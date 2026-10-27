@@ -79,6 +79,7 @@ CREATE INDEX IF NOT EXISTS idx_notifications_case ON notifications(case_id);
 
 const DEFAULT_SETTINGS = {
   alert_sentence_days: '30',
+  alert_reminder_wait_days: '15',
   alert_payment_days: '30',
   home_court_name: 'Segundo Juzgado de Policía Local de Valdivia',
   os_notifications: '1',

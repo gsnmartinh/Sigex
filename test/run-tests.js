@@ -62,6 +62,18 @@ t('alerta: carta enviada hace 31 días sin sentencia = vencida; hace 25 = próxi
   assert.strictEqual(b[0].severity, 'proximo'); assert.strictEqual(b[0].days_left, 5);
   assert.strictEqual(L.alertsFor(mk('2026-10-09'), S, '2026-10-19').filter(x => x.kind === 'plazo').length, 0);
 });
+t('recordatorios: salen de vencidos, esperan 15 días, vuelven numerados y desde el 3° escalan', () => {
+  const c = n => ({ letter_sent_date: '2026-08-01', reminder_count: n, last_reminder: '2026-10-10' });
+  const st = { ...S, alert_reminder_wait_days: '15' };
+  const w = L.alertsFor(c(1), st, '2026-10-20'); // 10 días después: esperando
+  assert.ok(w.some(a => a.kind === 'espera' && a.days_left === 5 && !a.escalate));
+  assert.ok(!w.some(a => a.severity === 'vencido'));
+  const v = L.alertsFor(c(1), st, '2026-10-26'); // pasaron 16 días: vuelve a vencidos
+  assert.ok(v.some(a => a.code === 'sentencia_atrasada' && a.severity === 'vencido' && /1° recordatorio/.test(a.title)) && !v.some(a => a.kind === 'espera'));
+  assert.ok(L.alertsFor(c(3), st, '2026-10-20').some(a => a.kind === 'espera' && a.escalate));
+  assert.ok(L.alertsFor(c(3), st, '2026-10-26').some(a => a.severity === 'vencido' && a.escalate));
+  assert.ok(!L.alertsFor({ letter_sent_date: '2026-10-01' }, st, '2026-10-20').some(a => a.kind === 'espera'));
+});
 t('alerta: notificado sin comprobante a 30 días vence hoy; absolución no genera plazo', () => {
   const c = { sentence_date: '2026-09-01', notification_date: '2026-09-19', resolution: 'Transferencia' };
   const a = L.alertsFor(c, S, '2026-10-19');
@@ -254,9 +266,14 @@ t('recordatorios: agrupa por juzgado, un correo por tribunal, registra y migra l
   sv.registerReminder({ case_ids: m.case_ids, date: '2026-10-27', to: m.to, subject: m.subject, body: m.body });
   assert.strictEqual(sv.getCase(c2).notifications[0].kind, 'recordatorio');
   assert.strictEqual(sv.getCase(c2).stage, 'carta', 'el recordatorio no cambia la etapa');
-  assert.strictEqual(sv.reminderGroups()[0].cases[0].last_reminder, '2026-10-27');
+  // tras registrar, esas causas salen de vencidos y quedan "esperando respuesta del juzgado"
+  assert.deepStrictEqual(sv.reminderGroups().map(x => x.cases.map(c => c.rol)), [['99-26']]);
+  const dsh = sv.dashboard();
+  assert.strictEqual(dsh.counts.waiting, 2);
+  assert.ok(dsh.waiting.every(a => a.code === 'esperando_respuesta' && a.days_left === 15) && !dsh.overdue.some(a => a.case_id === c1 || a.case_id === c2));
+  assert.strictEqual(sv.listCases({ stage: 'esperando_juzgado' }).length, 2);
   sv.saveTemplate('recordatorio', { subject: 'R {roles}', body: '{listado}\n\n{firma}' });
-  assert.ok(sv.buildReminder({ court_id: A, case_ids: [c1] }).body.startsWith('Rol 1001-26'));
+  assert.ok(sv.buildReminder({ court_id: B, case_ids: [c4] }).body.startsWith('Rol 99-26'));
   assert.throws(() => sv.saveTemplate('recordatorio', { subject: 'x', body: '{saludo}' }), /desconocid/);
   sv.resetTemplate('recordatorio');
   assert.ok(sv.previewTemplate('recordatorio', sv.getTemplates().recordatorio).body.includes('1. Rol 1234-2026'));

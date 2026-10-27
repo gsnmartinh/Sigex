@@ -133,7 +133,23 @@ function alertsFor(c, settings, today) {
     if (stage === 'ingresado') {
       out.push({ kind: 'accion', severity: 'info', code: 'enviar_carta', title: 'Enviar carta al juzgado remitente', due_date: null, days_left: null });
     } else if (stage === 'carta') {
-      deadline('sentencia_atrasada', `Sin sentencia ${sentenceDays} días después de enviar la carta`, c.letter_sent_date, sentenceDays);
+      const n = Number(c.reminder_count) || 0;
+      const last = c.last_reminder ? String(c.last_reminder).slice(0, 10) : null;
+      if (n > 0 && last) {
+        // Ya se reclamó al juzgado: la causa queda "esperando respuesta" hasta que pasen los días de espera.
+        const waitDays = Number(settings.alert_reminder_wait_days) || 15;
+        const until = addDays(last, waitDays);
+        const left = diffDays(today, until);
+        if (left >= 0) {
+          out.push({ kind: 'espera', severity: 'info', code: 'esperando_respuesta', title: `${n}° recordatorio enviado el ${last.split('-').reverse().join('-')}: esperando respuesta del juzgado`,
+            due_date: until, days_left: left, reminder_count: n, last_reminder: last, escalate: n >= 3 });
+        } else {
+          out.push({ kind: 'plazo', severity: 'vencido', code: 'sentencia_atrasada', title: `Sin respuesta al ${n}° recordatorio${n >= 3 ? ': llamar al juzgado' : ''}`,
+            due_date: until, days_left: left, reminder_count: n, last_reminder: last, escalate: n >= 3 });
+        }
+      } else {
+        deadline('sentencia_atrasada', `Sin sentencia ${sentenceDays} días después de enviar la carta`, c.letter_sent_date, sentenceDays);
+      }
     } else if (stage === 'sentencia') {
       out.push({ kind: 'accion', severity: 'info', code: 'notificar', title: 'Notificar la sentencia al infractor', due_date: null, days_left: null });
     } else if (stage === 'notificado') {

@@ -25,7 +25,7 @@ function createService({ db, attachmentsDir, now = () => new Date() }) {
     return out;
   }
   function saveSettings(patch) {
-    const allowed = ['alert_sentence_days', 'alert_payment_days', 'home_court_name', 'os_notifications', 'holidays', 'mail_client', 'email_signature', 'signature_image', 'greeting_name', 'backup_dir', 'backup_keep'];
+    const allowed = ['alert_sentence_days', 'alert_reminder_wait_days', 'alert_payment_days', 'home_court_name', 'os_notifications', 'holidays', 'mail_client', 'email_signature', 'signature_image', 'greeting_name', 'backup_dir', 'backup_keep'];
     const up = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
     for (const k of allowed) {
       if (!(k in patch)) continue;
@@ -210,7 +210,9 @@ function createService({ db, attachmentsDir, now = () => new Date() }) {
   // ---------- Exhortos ----------
   const caseSelect = `
     SELECT x.*, c.name AS court_name, c.commune AS court_commune, c.email AS court_email, c.phone AS court_phone, c.address AS court_address,
-      (SELECT COUNT(*) FROM documents d WHERE d.case_id = x.id AND d.kind = 'sentencia') AS sentence_docs
+      (SELECT COUNT(*) FROM documents d WHERE d.case_id = x.id AND d.kind = 'sentencia') AS sentence_docs,
+      (SELECT COUNT(*) FROM notifications n WHERE n.case_id = x.id AND n.kind = 'recordatorio') AS reminder_count,
+      (SELECT MAX(n.sent_at) FROM notifications n WHERE n.case_id = x.id AND n.kind = 'recordatorio') AS last_reminder
     FROM cases x JOIN courts c ON c.id = x.court_id`;
 
   function decorate(row, settings, t) {
@@ -243,6 +245,7 @@ function createService({ db, attachmentsDir, now = () => new Date() }) {
     const f = clean(filters.stage);
     if (f === 'abiertos') rows = rows.filter(r => !r.final_status);
     else if (f === 'cerrados') rows = rows.filter(r => !!r.final_status);
+    else if (f === 'esperando_juzgado') rows = rows.filter(r => r.alerts.some(a => a.kind === 'espera'));
     else if (f === 'con_alerta') rows = rows.filter(r => r.alerts.some(a => a.kind === 'plazo'));
     else if (f === 'revisar') rows = rows.filter(r => r.needs_review);
     else if (f === 'suspension') rows = rows.filter(r => r.suspension && r.suspension.state !== 'cumplida' && !r.final_status);
@@ -423,7 +426,7 @@ function createService({ db, attachmentsDir, now = () => new Date() }) {
       if (!groups.has(r.court_id)) groups.set(r.court_id, { court_id: r.court_id, court_name: r.court_name, court_email: r.court_email || '', cases: [] });
       groups.get(r.court_id).cases.push({
         id: r.id, rol: r.rol, offender_name: r.offender_name, offender_rut: r.offender_rut,
-        citation_number: r.citation_number, tracking_code: r.tracking_code,
+        citation_number: r.citation_number, tracking_code: r.tracking_code, reminder_count: r.reminder_count,
         entry_date: r.entry_date, letter_sent_date: r.letter_sent_date, due_date: al.due_date, days_overdue: -al.days_left,
         last_reminder: lastRem.get(r.id).d || null
       });
@@ -510,6 +513,7 @@ function createService({ db, attachmentsDir, now = () => new Date() }) {
     const actions = by(a => a.kind === 'accion');
     const suspensions = by(a => a.kind === 'suspension').sort((a, b) => (a.days_left ?? 9999) - (b.days_left ?? 9999));
     const review = by(a => a.kind === 'revisar');
+    const waiting = by(a => a.kind === 'espera').sort((a, b) => (b.escalate - a.escalate) || (a.days_left - b.days_left));
     const t = today();
     const month = t.slice(0, 7);
     return {
@@ -518,11 +522,11 @@ function createService({ db, attachmentsDir, now = () => new Date() }) {
         overdue: overdue.length, soon: soon.length,
         notify: actions.filter(a => a.code === 'notificar').length,
         letter: actions.filter(a => a.code === 'enviar_carta').length,
-        suspensions: suspensions.length, review: review.length,
+        suspensions: suspensions.length, review: review.length, waiting: waiting.length,
         open: open.length, total: rows.length,
         closed_month: rows.filter(r => r.final_status && String(r.updated_at || r.created_at || '').startsWith(month)).length
       },
-      overdue, soon, actions, suspensions, review
+      overdue, soon, actions, suspensions, review, waiting
     };
   }
 

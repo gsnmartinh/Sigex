@@ -268,3 +268,7 @@ textarea.tpl-body { min-height: 300px; }
 .rem-list { flex-direction: column; flex-wrap: nowrap; gap: 8px; }
 .rem-case { align-items: flex-start !important; }
 .rem-case .sub { display: block; }
+
+/* Causas con 3 o más recordatorios sin respuesta: llamar al juzgado */
+.aitem.escalate { border-left: 3px solid var(--danger, #c42b1c); background: color-mix(in srgb, var(--danger, #c42b1c) 8%, transparent); }
+.aitem.escalate .atitle { color: var(--danger, #c42b1c); font-weight: 600; }

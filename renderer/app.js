@@ -284,7 +284,7 @@ async function updateBadge() {
 
 // ---------- Panel ----------
 function alertRow(a) {
-  return h('div', { class: 'aitem', role: 'button', tabindex: 0, onclick: () => go('case', a.case_id), onkeydown: e => { if (e.key === 'Enter') go('case', a.case_id); } },
+  return h('div', { class: `aitem${a.escalate ? ' escalate' : ''}`, role: 'button', tabindex: 0, onclick: () => go('case', a.case_id), onkeydown: e => { if (e.key === 'Enter') go('case', a.case_id); } },
     h('div', null,
       h('div', null, h('span', { class: 'arol' }, `Rol ${a.rol}`), ' · ', h('span', { class: 'atitle' }, a.title)),
       h('div', { class: 'ameta' }, [a.court_name, a.offender_name].filter(Boolean).join(' · '))),
@@ -309,6 +309,7 @@ async function renderPanel(main) {
     h('div', { class: 'kpis' },
       kpi(d.counts.overdue, 'Plazos vencidos', 'bad', 'con_alerta'),
       kpi(d.counts.soon, 'Vencen en 7 días', 'warn', 'con_alerta'),
+      kpi(d.counts.waiting, 'Esperando respuesta del juzgado', '', 'esperando_juzgado'),
       kpi(d.counts.notify, 'Sentencias por notificar', 'warn', 'sentencia'),
       kpi(d.counts.letter, 'Cartas por enviar', '', 'ingresado'),
       kpi(d.counts.suspensions, 'Suspensiones en curso', '', 'suspension'),
@@ -316,6 +317,7 @@ async function renderPanel(main) {
     h('div', { class: 'cols' },
       alertCard('Plazos vencidos', d.overdue, 'No hay plazos vencidos.'),
       alertCard('Por vencer en 7 días', d.soon, 'Nada vence esta semana.'),
+      alertCard('Esperando respuesta del juzgado', d.waiting, 'No hay causas esperando respuesta tras un recordatorio.'),
       alertCard('Acciones pendientes', d.actions, 'No hay acciones pendientes.'),
       alertCard('Suspensiones de licencia', d.suspensions, 'No hay suspensiones registradas.'),
       d.review.length ? alertCard('Exhortos por revisar', d.review, '') : null));
@@ -323,7 +325,7 @@ async function renderPanel(main) {
 
 // ---------- Lista de exhortos ----------
 const STAGE_FILTERS = [
-  ['abiertos', 'Abiertos'], ['con_alerta', 'Con plazo vencido o por vencer'], ['ingresado', 'Falta enviar carta'], ['carta', 'Esperando sentencia'],
+  ['abiertos', 'Abiertos'], ['con_alerta', 'Con plazo vencido o por vencer'], ['ingresado', 'Falta enviar carta'], ['carta', 'Esperando sentencia'], ['esperando_juzgado', 'Recordatorio enviado: esperando respuesta del juzgado'],
   ['sentencia', 'Por notificar'], ['notificado', 'Esperando comprobante'], ['comprobante', 'Comprobante recibido'], ['suspension', 'Con suspensión en curso'],
   ['revisar', 'Por revisar (migrados)'], ['cerrados', 'Cerrados'], ['', 'Todos']
 ];
@@ -739,7 +741,7 @@ async function reminderModal() {
       return h('label', { class: 'rem-case' }, box, h('span', null,
         h('strong', null, `Rol ${c.rol}`), c.offender_name ? ` · ${c.offender_name}` : '',
         h('span', { class: 'sub' }, ` Carta enviada ${fmtDate(c.letter_sent_date)} · plazo vencido hace ${plural(c.days_overdue, 'día', 'días')}`
-          + (c.last_reminder ? ` · último recordatorio ${fmtDate(c.last_reminder)}` : '')
+          + (c.last_reminder ? ` · ${c.reminder_count}° recordatorio enviado ${fmtDate(c.last_reminder)}` : '')
           + (c.citation_number ? '' : ' · sin boleta de citación') + (c.tracking_code ? '' : ' · sin código de Correos'))));
     });
     return h('section', { class: 'card rem-group' },
@@ -941,6 +943,7 @@ async function renderSettings(main) {
   const info = await rpc('appInfo').catch(() => null);
   const s = state.settings;
   const sentence = h('input', { type: 'number', id: 's-sentence', min: 1, max: 365, value: s.alert_sentence_days });
+  const remWait = h('input', { type: 'number', id: 's-remwait', min: 1, max: 365, value: s.alert_reminder_wait_days || 15 });
   const payment = h('input', { type: 'number', id: 's-payment', min: 1, max: 365, value: s.alert_payment_days });
   const home = h('input', { type: 'text', id: 's-home', value: s.home_court_name });
   const osn = h('input', { type: 'checkbox', id: 's-os', checked: s.os_notifications === '1' });
@@ -962,6 +965,7 @@ async function renderSettings(main) {
     h('section', { class: 'card' }, h('h3', null, 'Plazos y alertas'),
       h('div', { class: 'form-grid' },
         h('div', { class: 'field' }, h('label', { for: 's-sentence' }, 'Esperar sentencia (días desde el envío de la carta)'), sentence),
+        h('div', { class: 'field' }, h('label', { for: 's-remwait' }, 'Esperar respuesta tras un recordatorio (días)'), remWait, h('span', { class: 'hint' }, 'Después de registrar un recordatorio, la causa sale de "vencidos" y espera este tiempo. Si no hay sentencia, vuelve a vencidos para el siguiente recordatorio.')),
         h('div', { class: 'field' }, h('label', { for: 's-payment' }, 'Esperar comprobante (días desde la notificación)'), payment),
         h('div', { class: 'field full' }, h('label', { for: 's-home' }, 'Nombre de tu juzgado (firma de los correos)'), home),
         h('div', { class: 'field full' }, h('label', { for: 's-greet' }, 'Nombre del infractor en el saludo'), greetSel, h('span', { class: 'hint' }, 'Se toma del nombre registrado en el exhorto. Con "primer nombre" se usa la primera palabra, así que escríbelo como Nombre Apellido. Si el exhorto no tiene nombre, el saludo queda como "Estimado:".')),
@@ -971,7 +975,7 @@ async function renderSettings(main) {
         h('div', { class: 'field full' }, h('label', { for: 's-hol' }, 'Feriados (no se cuentan como días hábiles en el plazo de reenvío)'), hol, h('span', { class: 'hint' }, 'Un día por línea, formato AAAA-MM-DD. Sábados y domingos ya se descuentan. Revisa esta lista y agrega los feriados que falten.')),
         h('div', { class: 'field full' }, h('div', { class: 'checks' }, h('label', null, osn, 'Avisar con una notificación de Windows cuando haya plazos vencidos'))),
         h('div', { class: 'modal-actions' }, h('button', { class: 'btn primary', onclick: () => run(async () => {
-          await rpc('saveSettings', { alert_sentence_days: sentence.value, alert_payment_days: payment.value, home_court_name: home.value, os_notifications: osn.checked ? '1' : '0', holidays: hol.value, mail_client: mailClient.value, greeting_name: greetSel.value, email_signature: sig.value });
+          await rpc('saveSettings', { alert_sentence_days: sentence.value, alert_reminder_wait_days: remWait.value, alert_payment_days: payment.value, home_court_name: home.value, os_notifications: osn.checked ? '1' : '0', holidays: hol.value, mail_client: mailClient.value, greeting_name: greetSel.value, email_signature: sig.value });
           toast('Ajustes guardados', 'ok'); await loadSettings(); updateBadge();
         }) }, 'Guardar ajustes')))),
     await templatesCard(),
