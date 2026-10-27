@@ -1,0 +1,326 @@
+[
+ {
+  "name": "Juzgado de Policía Local de Ancud",
+  "commune": "Ancud",
+  "region": "Los Lagos",
+  "address": "Baquedano 300 piso 2",
+  "email": "jpl@muniancud.cl",
+  "phone": "65-2487795",
+  "notes": null
+ },
+ {
+  "name": "Juzgado de Policía Local de Bulnes",
+  "commune": "Bulnes",
+  "region": "Ñuble",
+  "address": "Victor Bianchi 415, 2do piso",
+  "email": "jplbulnes@imb.cl",
+  "phone": null,
+  "notes": null
+ },
+ {
+  "name": "Juzgado de Policía Local de Cabrero",
+  "commune": "Cabrero",
+  "region": "Biobío",
+  "address": "Las Delicias N° 355",
+  "email": "juzgado@cabrero.cl",
+  "phone": null,
+  "notes": null
+ },
+ {
+  "name": "Juzgado de Policía Local de Collipulli",
+  "commune": "Collipulli",
+  "region": "La Araucanía",
+  "address": "Avenida Saavedra Sur #1355 Collipulli.",
+  "email": "jpl@municollipulli.cl",
+  "phone": null,
+  "notes": null
+ },
+ {
+  "name": "Juzgado de Policía Local de El Monte",
+  "commune": "El Monte",
+  "region": "Metropolitana de Santiago",
+  "address": "Independencia N°70",
+  "email": null,
+  "phone": null,
+  "notes": null
+ },
+ {
+  "name": "Juzgado de Policía Local de Ercilla",
+  "commune": "Ercilla",
+  "region": "La Araucanía",
+  "address": "Quilapan 358",
+  "email": null,
+  "phone": null,
+  "notes": null
+ },
+ {
+  "name": "Juzgado de Policía Local de Futrono",
+  "commune": "Futrono",
+  "region": "Los Ríos",
+  "address": "Juan Luis Sanfuentes 75",
+  "email": null,
+  "phone": null,
+  "notes": null
+ },
+ {
+  "name": "Juzgado de Policía Local de Hualañe",
+  "commune": "Hualañe",
+  "region": "Maule",
+  "address": "Ignacio Carrera Pinto S/N",
+  "email": "juzgado@hualane.cl",
+  "phone": "+569 56479794",
+  "notes": null
+ },
+ {
+  "name": "Juzgado de Policía Local de La Unión",
+  "commune": "La Unión",
+  "region": "Los Ríos",
+  "address": "Serrano Nro. 638, La Unión.",
+  "email": null,
+  "phone": null,
+  "notes": null
+ },
+ {
+  "name": "Juzgado de Policía Local de Lago Ranco",
+  "commune": "Lago Ranco",
+  "region": "Los Ríos",
+  "address": null,
+  "email": null,
+  "phone": null,
+  "notes": null
+ },
+ {
+  "name": "Juzgado de Policía Local de Lanco",
+  "commune": "Lanco",
+  "region": "Los Ríos",
+  "address": "Condor 226, Lanco",
+  "email": null,
+  "phone": "632670152",
+  "notes": null
+ },
+ {
+  "name": "Juzgado de Policía Local de Llanquihue",
+  "commune": "Llanquihue",
+  "region": "Los Lagos",
+  "address": "Erardo Werner 450",
+  "email": null,
+  "phone": null,
+  "notes": null
+ },
+ {
+  "name": "Juzgado de Policía Local de Los Lagos",
+  "commune": "Los Lagos",
+  "region": "Los Ríos",
+  "address": "San Martín SN",
+  "email": null,
+  "phone": null,
+  "notes": null
+ },
+ {
+  "name": "Juzgado de Policía Local de Mariquina",
+  "commune": "Mariquina",
+  "region": "Los Ríos",
+  "address": "Alejo Carrillo 1100",
+  "email": "juzgado@munimariquina.cl",
+  "phone": "56 63 2453248 / +56 63 2453247.",
+  "notes": null
+ },
+ {
+  "name": "Juzgado de Policía Local de Padre Las Casas",
+  "commune": "Padre Las Casas",
+  "region": "La Araucanía",
+  "address": "Avenida Villa Alegre 1008 B",
+  "email": null,
+  "phone": null,
+  "notes": null
+ },
+ {
+  "name": "Juzgado de Policía Local de Paillaco",
+  "commune": "Paillaco",
+  "region": "Los Ríos",
+  "address": "Arturo Prat 916",
+  "email": null,
+  "phone": null,
+  "notes": null
+ },
+ {
+  "name": "Juzgado de Policía Local de Panguipulli",
+  "commune": "Panguipulli",
+  "region": "Los Ríos",
+  "address": "Juan Bautista Etchegaray S/N°",
+  "email": null,
+  "phone": null,
+  "notes": null
+ },
+ {
+  "name": "Juzgado de Policía Local de Perquenco",
+  "commune": "Perquenco",
+  "region": "La Araucanía",
+  "address": "Esmeralda 320",
+  "email": null,
+  "phone": null,
+  "notes": null
+ },
+ {
+  "name": "Juzgado de Policía Local de Puerto Octay",
+  "commune": "Puerto Octay",
+  "region": "Los Lagos",
+  "address": "Pedro Montt 402 Puerto Octay",
+  "email": null,
+  "phone": null,
+  "notes": null
+ },
+ {
+  "name": "Juzgado de Policía Local de Puerto Varas",
+  "commune": "Puerto Varas",
+  "region": "Los Lagos",
+  "address": null,
+  "email": null,
+  "phone": null,
+  "notes": null
+ },
+ {
+  "name": "Juzgado de Policía Local de Purranque",
+  "commune": "Purranque",
+  "region": "Los Lagos",
+  "address": null,
+  "email": null,
+  "phone": null,
+  "notes": null
+ },
+ {
+  "name": "Juzgado de Policía Local de Rio Bueno",
+  "commune": "Rio Bueno",
+  "region": "Los Ríos",
+  "address": null,
+  "email": null,
+  "phone": null,
+  "notes": null
+ },
+ {
+  "name": "Juzgado de Policía Local de Rio Negro",
+  "commune": "Rio Negro",
+  "region": "Los Lagos",
+  "address": null,
+  "email": null,
+  "phone": null,
+  "notes": null
+ },
+ {
+  "name": "Juzgado de Policía Local de San Pablo",
+  "commune": "San Pablo",
+  "region": "Los Lagos",
+  "address": "Bolivia N° 498",
+  "email": null,
+  "phone": null,
+  "notes": null
+ },
+ {
+  "name": "Juzgado de Policía Local de Teodoro Schmidt",
+  "commune": "Teodoro Schmidt",
+  "region": "La Araucanía",
+  "address": "Carlos Ibañez 429",
+  "email": null,
+  "phone": null,
+  "notes": null
+ },
+ {
+  "name": "Juzgado de Policía Local de Victoria",
+  "commune": "Victoria",
+  "region": "La Araucanía",
+  "address": "General Lagos Nº 660",
+  "email": null,
+  "phone": null,
+  "notes": null
+ },
+ {
+  "name": "Primer Juzgado de Policía Local de Osorno",
+  "commune": "Osorno",
+  "region": "Los Lagos",
+  "address": "Ramon Freire 727 Primer Piso",
+  "email": "primerjpl@imo.cl",
+  "phone": "642232980-642209755-642223809",
+  "notes": null
+ },
+ {
+  "name": "Primer Juzgado de Policía Local de Puerto Montt",
+  "commune": "Puerto Montt",
+  "region": "Los Lagos",
+  "address": null,
+  "email": null,
+  "phone": null,
+  "notes": null
+ },
+ {
+  "name": "Primer Juzgado de Policía Local de Temuco",
+  "commune": "Temuco",
+  "region": "La Araucanía",
+  "address": "Antonio Varas 631, Piso 1",
+  "email": "1erjuzgado@temuco.cl",
+  "phone": "Oficina de Partes: +56 45 297 3503",
+  "notes": null
+ },
+ {
+  "name": "Segundo Juzgado de Policía Local de Los Angeles",
+  "commune": "Los Angeles",
+  "region": "Biobío",
+  "address": "Avda. Las Industrias Pedro Stark Troncoso 10460 3° piso.",
+  "email": null,
+  "phone": null,
+  "notes": null
+ },
+ {
+  "name": "Segundo Juzgado de Policía Local de Pudahuel",
+  "commune": "Pudahuel",
+  "region": "Metropolitana de Santiago",
+  "address": "TENIENTE CRUZ 762",
+  "email": null,
+  "phone": null,
+  "notes": null
+ },
+ {
+  "name": "Segundo Juzgado de Policía Local de Temuco",
+  "commune": "Temuco",
+  "region": "La Araucanía",
+  "address": "Antonio Varas 631, Piso 2",
+  "email": "2dojuzgado@temuco.cl",
+  "phone": "+56 45 2973551",
+  "notes": null
+ },
+ {
+  "name": "Segundo Juzgado de Policía Local de Valdivia",
+  "commune": "Valdivia",
+  "region": "Los Ríos",
+  "address": null,
+  "email": null,
+  "phone": null,
+  "notes": null
+ },
+ {
+  "name": "Segundo Juzgado de Policía Local de Vitacura",
+  "commune": "Vitacura",
+  "region": "Metropolitana de Santiago",
+  "address": null,
+  "email": null,
+  "phone": null,
+  "notes": null
+ },
+ {
+  "name": "Tercer Juzgado de Policía Local de Las Condes",
+  "commune": "Las Condes",
+  "region": "Metropolitana de Santiago",
+  "address": null,
+  "email": null,
+  "phone": null,
+  "notes": null
+ },
+ {
+  "name": "Tercer Juzgado de Policía Local de Temuco",
+  "commune": "Temuco",
+  "region": "La Araucanía",
+  "address": "Antonio Varas 631, Piso 2",
+  "email": null,
+  "phone": null,
+  "notes": null
+ }
+]

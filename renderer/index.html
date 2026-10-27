@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:;" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SIGEX · Gestión de exhortos</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <img class="brand-logo" src="./logo.png" alt="" width="38" height="38" />
+        <div>
+          <strong>SIGEX</strong>
+          <small>Gestión de exhortos</small>
+        </div>
+      </div>
+      <button class="btn primary block" id="btn-new-case">+ Nuevo exhorto</button>
+      <nav class="nav" id="nav">
+        <button data-view="panel" class="active">Panel <span class="pill hidden" id="nav-badge-panel"></span></button>
+        <button data-view="cases">Exhortos</button>
+        <button data-view="courts">Directorio de juzgados</button>
+        <button data-view="settings">Ajustes</button>
+      </nav>
+      <div class="sidebar-foot" id="home-court"></div>
+    </aside>
+    <main class="main" id="main" tabindex="-1"></main>
+  </div>
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+  <script src="./app.js"></script>
+</body>
+</html>

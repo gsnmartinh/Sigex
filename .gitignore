@@ -1,0 +1,16 @@
+# Dependencias y compilados
+node_modules/
+dist/
+release/
+# Datos reales: nunca subir bases de datos, documentos escaneados ni respaldos
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite-journal
+documentos/
+SIGEX-respaldo/
+respaldo_sigex_*
+# Varios
+*.log
+.DS_Store
+Thumbs.db

@@ -1,0 +1,29 @@
+SIGEX 2 - Gestión de exhortos (JPL)
+
+CÓMO ABRIRLA
+  Doble clic en iniciar.bat (usa el Electron ya instalado en la carpeta Exhorto-app).
+
+TUS DATOS
+  - Al abrir por primera vez importa automáticamente lo de la versión anterior
+    (36 juzgados, exhortos y notificaciones). La base anterior NO se modifica.
+  - Base nueva:   %APPDATA%\sigex\data\sigex2.sqlite
+  - Documentos:   %APPDATA%\sigex\documentos\
+  - Ajustes > "Respaldar base de datos" guarda una copia donde tú elijas.
+
+CORREO
+  "Notificar por correo" abre un borrador en Outlook con la sentencia adjunta.
+  Tú lo revisas y lo envías; luego confirmas en SIGEX para registrar la notificación.
+
+CREAR INSTALADOR (opcional)
+  En una terminal dentro de esta carpeta: npm install   y luego   npm run dist
+
+ESCANEO DE DOCUMENTOS
+- En la ficha del exhorto: Documentos > "Escanear...". Tambien aparece junto a "Elegir archivo..." al registrar sentencia o comprobante.
+- Se abre la ventana de tu escaner (WIA de Windows). Escanea hoja por hoja y al final "Guardar documento": se arma un solo PDF y queda guardado en el exhorto.
+- Si el escaner no aparece, instala/enciende el controlador del fabricante; mientras tanto "Adjuntar..." sigue funcionando con archivos.
+
+RESPALDO EN LA NUBE (OneDrive / Google Drive)
+- Ajustes > Datos y respaldo > "Elegir carpeta...": elige una carpeta que tu OneDrive o Google Drive de escritorio ya sincronice.
+- Al cerrar SIGEX se guarda en esa carpeta (subcarpeta SIGEX-respaldo) una copia por dia de la base y los documentos. Se conservan los ultimos 14 dias (configurable).
+- La base que usas siempre es local; solo se sincronizan las copias. Usa la cuenta institucional: hay datos personales.
+- Para restaurar: cierra SIGEX, copia el archivo sigex2_AAAA-MM-DD.sqlite que quieras a %APPDATA%\sigex\data\ con el nombre sigex2.sqlite, y la carpeta "documentos" del respaldo a %APPDATA%\sigex\documentos\.

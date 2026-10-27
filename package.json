@@ -1,0 +1,56 @@
+{
+  "name": "sigex-exhortos",
+  "productName": "SIGEX",
+  "version": "2.0.0",
+  "description": "SIGEX 2 · Gestión de exhortos para Juzgado de Policía Local",
+  "main": "main.js",
+  "author": "Guillermo San Martin",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "test": "node test/run-tests.js",
+    "dist": "electron-builder --win nsis"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.3"
+  },
+  "devDependencies": {
+    "electron": "37.10.3",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "cl.sigex.app2",
+    "productName": "SIGEX",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "src/**/*",
+      "renderer/**/*",
+      "data/**/*",
+      "package.json",
+      "build/icon_512.png"
+    ],
+    "asarUnpack": [
+      "**/node_modules/better-sqlite3/**"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "SIGEX2_Setup_${version}.${ext}"
+    },
+    "npmRebuild": false,
+    "buildDependenciesFromSource": false
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
