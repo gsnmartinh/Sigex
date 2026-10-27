@@ -1,0 +1,39 @@
+name: Publicar instalador
+
+# Se ejecuta al subir una etiqueta de versión (por ejemplo v2.0.0) o a mano desde la pestaña Actions.
+# Compila el instalador de Windows (SIGEX2_Setup_X.Y.Z.exe) y lo adjunta a una Release.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Pruebas
+        run: npm test
+      - name: Preparar el módulo nativo para Electron
+        run: npx electron-builder install-app-deps
+      - name: Compilar instalador
+        run: npx electron-builder --win nsis --publish never
+      - name: Guardar instalador como artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: instalador-windows
+          path: dist/SIGEX2_Setup_*.exe
+      - name: Publicar Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/SIGEX2_Setup_*.exe
+          generate_release_notes: true
