@@ -1,5 +1,5 @@
 'use strict';
-const { app, BrowserWindow, ipcMain, dialog, shell, Notification, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, Notification, Menu, nativeTheme } = require('electron');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -130,7 +130,7 @@ function createWindow(startup) {
     width: 1280, height: 840, minWidth: 1000, minHeight: 640,
     title: 'SIGEX · Gestión de exhortos',
     icon: path.join(__dirname, 'build', 'icon_512.png'),
-    backgroundColor: '#f4f6f9',
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#202020' : '#f3f3f3', // igual al fondo de Windows 11, sin destello al abrir
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true, nodeIntegration: false, sandbox: true
