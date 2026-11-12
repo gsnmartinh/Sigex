@@ -6,6 +6,7 @@ const path = require('path');
 const { openDatabase, seedCourts, importLegacy } = require('./src/db');
 const { createService } = require('./src/service');
 const { openDraft } = require('./src/outlook');
+const { MODELS, buildDocument, makeDocx } = require('./src/exhorto-documents');
 const { createScanSession } = require('./src/scan');
 
 // Los datos viven en la misma carpeta que usaba la versión anterior (%APPDATA%\sigex), en un archivo nuevo.
@@ -40,6 +41,17 @@ function pickFile(options) {
 // Todo lo que el renderer puede invocar. Las funciones del servicio se exponen tal cual.
 function buildHandlers() {
   const h = { ...service };
+  h.documentModels = () => MODELS;
+  h.previewExhortoDocument = (id, input) => buildDocument(service.getCase(id), { ...input, preview: !input.ord }, service.getSettings().home_court_name);
+  h.exportExhortoDocument = async (id, input) => {
+    const c = service.getCase(id);
+    const lines = buildDocument(c, { ...input, preview: false }, service.getSettings().home_court_name);
+    const name = (input.model.toUpperCase() + ' - ' + c.rol).replace(/[^a-zA-Z0-9 ._-]/g, '_');
+    const result = await dialog.showSaveDialog(win, { defaultPath: name + '.docx', filters: [{ name: 'Word', extensions: ['docx'] }] });
+    if (result.canceled || !result.filePath) return { canceled: true };
+    await fs.promises.writeFile(result.filePath, makeDocx(lines));
+    return { canceled: false };
+  };
   h.pickAndAttach = async (caseId, kind) => {
     const files = await pickFile({ title: 'Seleccionar documento', properties: ['openFile', 'multiSelections'], filters: [{ name: 'PDF e imágenes', extensions: ['pdf', 'png', 'jpg', 'jpeg'] }, { name: 'Todos los archivos', extensions: ['*'] }] });
     if (!files) return { canceled: true };
