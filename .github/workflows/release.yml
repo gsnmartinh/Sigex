@@ -5,6 +5,7 @@ name: Publicar instalador
 on:
   push:
     tags: ['v*']
+    branches: ['sigex-documentos-exhortos']
   workflow_dispatch:
 
 permissions:

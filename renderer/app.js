@@ -441,6 +441,50 @@ async function editCaseModal(c) {
 }
 
 // ---------- Ficha del exhorto ----------
+async function exhortoDocumentModal(c) {
+  const models = await rpc('documentModels');
+  let key;
+  const selected = await formModal({
+    title: 'Generar documento',
+    submitLabel: 'Continuar',
+    fields: [{ name: 'model', label: 'Modelo', type: 'select', required: true,
+      options: Object.entries(models).map(([value, model]) => [value, model.title]) }],
+    values: { model: c.receipt_date ? 'x26web' : 'x10' },
+    onSubmit: v => { key = v.model; }
+  });
+  if (!selected) return;
+  const model = models[key];
+  const fields = [
+    { name: 'date', label: 'Fecha del documento', type: 'date', required: true },
+    { name: 'judge', label: 'Nombre de quien ejerce como juez', required: true },
+    { name: 'judgeRole', label: 'Cargo de quien ejerce como juez', required: true }
+  ];
+  if (key !== 'x10') fields.push(
+    { name: 'secretary', label: 'Nombre de Secretaría', required: true },
+    { name: 'secretaryRole', label: 'Cargo de Secretaría', required: true });
+  if (model.matter) fields.push(
+    { name: 'origin', label: 'Rol del tribunal de origen', required: true },
+    { name: 'ord', label: 'ORD. registrado en el libro de correspondencia', required: true });
+  if (model.payment) fields.push(
+    { name: 'amount', label: 'Monto pagado en pesos', type: 'number', required: true },
+    { name: 'platform', label: 'Plataforma municipal', required: true });
+  if (key === 'x26web') fields.push({ name: 'received', label: 'Recepción del comprobante', type: 'date', required: true });
+  let input, preview;
+  const ready = await formModal({
+    title: model.title, submitLabel: 'Vista previa', fields,
+    values: { date: state.meta.today, received: c.receipt_date },
+    onSubmit: async v => {
+      input = { ...v, model: key };
+      preview = await rpc('previewExhortoDocument', c.id, input);
+    }
+  });
+  if (!ready) return;
+  const accepted = await confirmBox(preview.filter(Boolean).join('\n\n'), 'Guardar Word');
+  if (!accepted) return;
+  const result = await rpc('exportExhortoDocument', c.id, input);
+  if (!result.canceled) toast('Documento Word guardado', 'ok');
+}
+
 async function renderCase(main, id) {
   const c = await rpc('getCase', id);
   const s = c.suspension;
@@ -535,7 +579,7 @@ async function renderCase(main, id) {
     h('button', { class: 'link back', onclick: () => go('cases') }, '← Volver a exhortos'),
     h('div', { class: 'page-head' },
       h('div', null, h('h2', null, `Rol ${c.rol}`, ' ', h('span', { class: `tag ${STAGE_TAG[c.stage]}`, style: 'vertical-align:middle;font-size:13px' }, c.stage_label)), h('p', null, c.court_name)),
-      h('div', { class: 'row' }, h('button', { class: 'btn', onclick: () => editCaseModal(c) }, 'Editar datos'),
+      h('div', { class: 'row' }, act('Generar documento', () => exhortoDocumentModal(c)), h('button', { class: 'btn', onclick: () => editCaseModal(c) }, 'Editar datos'),
         h('button', { class: 'btn danger', onclick: () => run(async () => { if (await confirmBox(`Se eliminará el exhorto ${c.rol} con sus documentos y correos registrados. Esta acción no se puede deshacer.`, 'Eliminar', { danger: true })) { await rpc('deleteCase', c.id); toast('Exhorto eliminado', 'ok'); go('cases'); } }) }, 'Eliminar'))),
     c.needs_review ? h('div', { class: 'banner warn' }, h('span', null, 'Este exhorto viene de la versión anterior y le faltan fechas (por ejemplo, cuándo se envió la carta o cuándo se notificó). Complétalas con "Editar datos" o con los botones de abajo, y luego márcalo como revisado.'), act('Marcar como revisado', async () => { await rpc('markReviewed', c.id); refresh(); })) : null,
     h('div', { class: 'detail' },
