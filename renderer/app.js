@@ -190,6 +190,13 @@ function formModal({ title, intro, fields, values = {}, submitLabel = 'Guardar',
       form.append(h('datalist', { id: listId }, state.courts.map(c => h('option', { value: c.name }))));
     }
 
+    const updateVisibility = () => {
+      for (const { el, def } of Object.values(controls)) {
+        if (def.when) el.parentElement.style.display = controls[def.when].el.value === 'yes' ? '' : 'none';
+      }
+    };
+    form.addEventListener('change', updateVisibility);
+    updateVisibility();
     const err = h('div', { class: 'form-error', role: 'alert' });
     const submit = h('button', { type: 'submit', class: 'btn primary' }, submitLabel);
     form.append(err, h('div', { class: 'modal-actions' }, h('button', { type: 'button', class: 'btn', onclick: () => dlg.close() }, 'Cancelar'), submit));
@@ -197,6 +204,7 @@ function formModal({ title, intro, fields, values = {}, submitLabel = 'Guardar',
     const collect = () => {
       const out = {};
       for (const [name, { el, def }] of Object.entries(controls)) {
+        if (def.when && controls[def.when].el.value !== 'yes') continue;
         if (def.type === 'checks') out[name] = [...el.querySelectorAll('input:checked')].map(i => i.value);
         else if (def.type === 'file') out[name] = el._path;
         else out[name] = typeof el.value === 'string' ? el.value.trim() : el.value;
@@ -369,6 +377,19 @@ async function renderCases(main) {
 // ---------- Nuevo / editar exhorto ----------
 const GENDER_OPTS = [['', 'Sin especificar'], ['M', 'Masculino'], ['F', 'Femenino']];
 
+const CASE_LICENSE_FIELDS = [
+  { name: 'license_retained', label: '¿Licencia retenida?', type: 'select', options: [['', 'Por confirmar'], ['yes', 'Sí'], ['no', 'No']] },
+  { name: 'license_class', label: 'Clase de licencia', when: 'license_retained' },
+  { name: 'license_municipality', label: 'Municipalidad que otorgó la licencia', when: 'license_retained' }
+];
+const LICENSE_RECEIPT_FIELDS = [
+  { name: 'license_received_date', label: 'Recepción de la licencia original', type: 'date', hint: 'Completa esta fecha solo si llegó el original.' },
+  { name: 'license_number', label: 'Número de licencia' },
+  { name: 'license_issued_date', label: 'Fecha de otorgamiento', type: 'date' },
+  { name: 'license_control_date', label: 'Fecha de control', type: 'date' },
+  { name: 'license_expiry_date', label: 'Vencimiento de la licencia original', type: 'date' }
+].map(field => ({ ...field, when: 'license_retained' }));
+
 async function newCaseModal() {
   await loadCourts();
   let createdId = null;
@@ -383,6 +404,8 @@ async function newCaseModal() {
       { name: 'offender_email', label: 'Correo del infractor', type: 'email' },
       { name: 'offender_phone', label: 'Teléfono' },
       { name: 'offender_gender', label: 'Género (para el saludo del correo)', type: 'select', options: GENDER_OPTS },
+      { name: 'offender_address', label: 'Domicilio', full: true },
+      ...CASE_LICENSE_FIELDS,
       { name: 'citation_number', label: 'N.º de boleta de citación' },
       { name: 'notes', label: 'Observaciones', type: 'textarea', full: true }
     ],
@@ -417,6 +440,9 @@ async function editCaseModal(c) {
       { name: 'offender_email', label: 'Correo del infractor', type: 'email' },
       { name: 'offender_phone', label: 'Teléfono' },
       { name: 'offender_gender', label: 'Género (saludo del correo)', type: 'select', options: GENDER_OPTS },
+      { name: 'offender_address', label: 'Domicilio', full: true },
+      ...CASE_LICENSE_FIELDS,
+      ...LICENSE_RECEIPT_FIELDS,
       { name: 'citation_number', label: 'N.º de boleta de citación' },
       { name: 'tracking_code', label: 'Código de seguimiento de Correos (carta)' },
       { name: 'notes', label: 'Observaciones', type: 'textarea', full: true },
@@ -441,48 +467,51 @@ async function editCaseModal(c) {
 }
 
 // ---------- Ficha del exhorto ----------
-async function exhortoDocumentModal(c) {
+async function exhortoDocumentModal(c, stage) {
   const models = await rpc('documentModels');
+  const available = Object.entries(models).filter(([, model]) => !stage || model.stage === stage);
   let key;
   const selected = await formModal({
     title: 'Generar documento',
     submitLabel: 'Continuar',
     fields: [{ name: 'model', label: 'Modelo', type: 'select', required: true,
-      options: Object.entries(models).map(([value, model]) => [value, model.title]) }],
-    values: { model: c.receipt_date ? 'x26web' : 'x10' },
+      options: available.map(([value, model]) => [value, model.title]) }],
+    values: { model: stage === 'solicitud' && c.license_retained === 'yes' ? 'x03con' : available[0][0] },
     onSubmit: v => { key = v.model; }
   });
   if (!selected) return;
   const model = models[key];
-  const fields = [
-    { name: 'date', label: 'Fecha del documento', type: 'date', required: true },
-    { name: 'judge', label: 'Nombre de quien ejerce como juez', required: true },
-    { name: 'judgeRole', label: 'Cargo de quien ejerce como juez', required: true }
-  ];
-  if (key !== 'x10') fields.push(
-    { name: 'secretary', label: 'Nombre de Secretaría', required: true },
-    { name: 'secretaryRole', label: 'Cargo de Secretaría', required: true });
-  if (model.matter) fields.push(
-    { name: 'origin', label: 'Rol del tribunal de origen', required: true },
-    { name: 'ord', label: 'ORD. registrado en el libro de correspondencia', required: true });
-  if (model.payment) fields.push(
-    { name: 'amount', label: 'Monto pagado en pesos', type: 'number', required: true },
-    { name: 'platform', label: 'Plataforma municipal', required: true });
-  if (key === 'x26web') fields.push({ name: 'received', label: 'Recepción del comprobante', type: 'date', required: true });
+  const today = state.meta.today;
+  const fields = [{ name: 'date', label: 'Fecha del documento', type: 'date', required: key !== 'x06', hint: key === 'x06' ? 'Si queda vacía, se usa la fecha de hoy.' : undefined }];
+  const saved = { address: c.offender_address };
+  if (key === 'x06' && c.license_retained !== 'no') Object.assign(saved, {
+    licenseClass: c.license_class, licenseNumber: c.license_number, municipality: c.license_municipality,
+    granted: c.license_issued_date, control: c.license_control_date
+  });
+  fields.push(...model.fields.filter(field => !saved[field.name]));
+  let payment = {};
+  if (model.stage === 'archivo') {
+    const choose = fields.pop();
+    const ok = await formModal({ title: model.title, submitLabel: 'Continuar', fields: [choose], values: { method: 'vale' }, onSubmit: v => { payment = v; } });
+    if (!ok) return;
+    if (payment.method !== 'none') fields.push(payment.method === 'web'
+      ? { name: 'platform', label: 'Plataforma municipal', required: true }
+      : { name: 'bank', label: 'Banco', required: true });
+  }
   let input, preview;
   const ready = await formModal({
     title: model.title, submitLabel: 'Vista previa', fields,
-    values: { date: state.meta.today, received: c.receipt_date },
+    values: { date: state.meta.today, received: c.receipt_date, dispatch: c.letter_sent_date, municipality: key === 'x06' ? c.license_municipality : c.court_commune, requested: 'sentencia' },
     onSubmit: async v => {
-      input = { ...v, model: key };
+      input = { ...Object.fromEntries(Object.entries(saved).filter(([, value]) => value)), ...v, ...payment, date: v.date || today, model: key };
       preview = await rpc('previewExhortoDocument', c.id, input);
     }
   });
   if (!ready) return;
-  const accepted = await confirmBox(preview.filter(Boolean).join('\n\n'), 'Guardar Word');
+  const accepted = await confirmBox(preview.filter(Boolean).join('\n\n'), 'Guardar y abrir Word');
   if (!accepted) return;
   const result = await rpc('exportExhortoDocument', c.id, input);
-  if (!result.canceled) toast('Documento Word guardado', 'ok');
+  if (!result.canceled) toast(result.usedDefaultTemplate ? 'Documento abierto con la plantilla original. La copia personalizada tiene marcadores incompatibles y se conservó.' : 'Documento guardado y abierto', result.usedDefaultTemplate ? 'warn' : 'ok');
 }
 
 async function renderCase(main, id) {
@@ -492,40 +521,47 @@ async function renderCase(main, id) {
 
   const act = (label, fn, primary = false) => h('button', { class: `btn sm${primary ? ' primary' : ''}`, onclick: () => run(fn) }, label);
 
+  const docsAt = (label, stage) => act(label, () => exhortoDocumentModal(c, stage));
   const plazoAlert = code => c.alerts.find(a => a.code === code);
   const stageIdx = ['ingresado', 'carta', 'sentencia', 'notificado', 'comprobante'].indexOf(c.stage);
   const closed = !!c.final_status;
   const noPay = c.resolution_list.includes('Absolución') || c.resolution_list.includes('Amonestación');
 
-  const step = ({ n, title, date, sub, done, current, na, button, deadline }) => h('li', { class: `step ${done ? 'done' : current ? 'current' : na ? 'na' : 'pending'}` },
+  const step = ({ n, title, date, sub, done, current, na, button, documents, deadline }) => h('li', { class: `step ${done ? 'done' : current ? 'current' : na ? 'na' : 'pending'}` },
     h('div', { class: 'dot' }, done ? '✓' : na ? '–' : n),
     h('div', null, h('div', { class: 'step-title' }, title, date ? h('span', { class: 'muted', style: 'font-weight:400' }, ` · ${fmtDate(date)}`) : null),
       sub ? h('div', { class: 'step-sub' }, sub) : null,
       deadline ? h('div', { style: 'margin-top:6px' }, h('span', { class: `tag ${tagClass(deadline.severity)}` }, `${deadline.title.split(' después')[0]} · ${daysText(deadline.days_left)} (${fmtDate(deadline.due_date)})`)) : null),
-    h('div', null, button));
+    h('div', { class: 'row', style: 'flex-wrap:wrap;justify-content:flex-end;gap:6px' }, documents, button));
 
   const letterAlert = plazoAlert('sentencia_atrasada');
   const payAlert = plazoAlert('comprobante_atrasado') || plazoAlert('reenvio_vencido');
   const steps = h('ol', { class: 'steps' },
-    step({ n: 1, title: 'Exhorto ingresado', date: c.entry_date, done: true }),
+    step({ n: 1, title: 'Exhorto ingresado', date: c.entry_date, done: true, documents: docsAt('Solicitud y permiso', 'solicitud') }),
     step({ n: 2, title: 'Carta enviada al juzgado remitente', date: c.letter_sent_date, done: !!c.letter_sent_date, current: !c.letter_sent_date && !closed && stageIdx === 0,
       sub: c.letter_sent_date ? `Plazo de respuesta: ${state.settings.alert_sentence_days} días${c.tracking_code ? ` · Correos: ${c.tracking_code}` : ''}` : 'Pendiente',
       deadline: !c.sentence_date ? letterAlert : null,
+      documents: !closed && c.letter_sent_date ? docsAt('Reiterar exhorto', 'reiteracion') : null,
       button: closed ? null : act(c.letter_sent_date ? 'Cambiar fecha' : 'Registrar envío', () => letterModal(c), !c.letter_sent_date) }),
     step({ n: 3, title: 'Sentencia recibida', date: c.sentence_date, done: !!c.sentence_date, current: !c.sentence_date && !closed && stageIdx === 1,
       sub: c.sentence_date ? [c.resolution_list.join(' · ') || 'Sin forma de cumplimiento indicada', c.sentence_docs ? `${plural(c.sentence_docs, 'PDF adjunto', 'PDF adjuntos')}` : 'sin PDF adjunto'].join(' — ') : 'Esperando que el juzgado remita la sentencia',
       button: closed ? null : act(c.sentence_date ? 'Editar' : 'Registrar sentencia', () => sentenceModal(c), !c.sentence_date && !!c.letter_sent_date) }),
     step({ n: 4, title: 'Notificado al infractor', date: c.notification_date, done: !!c.notification_date, current: !!c.sentence_date && !c.notification_date && !closed,
       sub: c.notification_date ? ((c.notifications.length ? `Correo registrado a ${c.notifications[0].to_email}` : 'Sin correo registrado') + (c.is_resend ? ' · reenvío' : '')) : (c.sentence_date ? 'Listo para notificar por correo' : 'Requiere la sentencia'),
+      documents: !closed && c.sentence_date ? docsAt('Documentos del recurso', 'recurso') : null,
       button: closed || !c.sentence_date ? null
         : c.notification_date && !c.receipt_date && !noPay ? act('Reenviar sentencia', () => notifyModal(c, { resend: true }))
         : act(c.notification_date ? 'Notificar de nuevo' : 'Notificar por correo', () => notifyModal(c), !c.notification_date) }),
     step({ n: 5, title: 'Comprobante de pago', date: c.receipt_date, done: !!c.receipt_date, na: noPay && !!c.notification_date, current: !!c.notification_date && !c.receipt_date && !noPay && !closed,
       sub: noPay ? 'No aplica: la causa terminó sin pago' : c.receipt_date ? 'Recibido' : c.notification_date ? (c.is_resend ? `Reenvío: 5 días hábiles para pagar (hasta el ${fmtDate(c.resend_due)}); si no, se devuelve el exhorto` : `Plazo: ${state.settings.alert_payment_days} días desde la notificación`) : 'Después de notificar',
       deadline: payAlert,
+      documents: c.receipt_date ? docsAt('Documentos de pago', 'pago') : null,
       button: closed || !c.notification_date || noPay ? null : act(c.receipt_date ? 'Cambiar fecha' : 'Registrar comprobante', () => receiptModal(c), !c.receipt_date) }),
     step({ n: 6, title: closed ? c.final_status : 'Cierre', date: c.final_status === 'Devuelto' ? c.return_date : null, done: closed,
       sub: closed ? (c.final_status === 'Devuelto' ? 'Devuelto al tribunal de origen' : c.final_status === 'Archivado' ? 'Causa archivada' : 'Exhorto anulado') : 'Devolver al tribunal, archivar o anular',
+      documents: c.final_status === 'Anulado' ? null : c.receipt_date || noPay || c.final_status === 'Archivado'
+        ? docsAt('Resolución de archivo', 'archivo')
+        : c.final_status === 'Devuelto' || c.is_resend ? docsAt('Documentos de devolución', 'devolucion') : null,
       button: closed ? act('Reabrir', async () => { await rpc('reopenCase', c.id); toast('Exhorto reabierto', 'ok'); refresh(); })
         : h('div', { class: 'row' },
           c.receipt_date ? act('Archivar causa', async () => { await rpc('closeCase', c.id, { status: 'Archivado' }); toast('Causa archivada', 'ok'); refresh(); }, true) : null,
@@ -642,12 +678,17 @@ async function sentenceModal(c) {
       { name: 'date', label: 'Fecha de la sentencia', type: 'date', required: true },
       { name: 'suspension_days', label: 'Días de suspensión de licencia', type: 'number', min: 1, step: 1, inputmode: 'numeric', hint: 'Déjalo vacío si la sentencia no suspende la licencia.' },
       { name: 'resolution', label: 'Forma de cumplimiento / resolución', type: 'checks', options: state.meta.resolution_types, full: true, hint: 'Marca todas las formas de pago que acepta la sentencia. Absolución o amonestación cierran la causa sin pago.' },
+      { section: 'Licencia de conducir' },
+      ...CASE_LICENSE_FIELDS,
+      ...LICENSE_RECEIPT_FIELDS,
+      { section: 'Escaneo de la sentencia' },
       { name: 'file', label: 'Documento de la sentencia (opcional)', type: 'file', full: true, scanName: `Sentencia Rol ${c.rol} ${state.meta.today}` }
     ],
-    values: { date: c.sentence_date || state.meta.today, suspension_days: c.suspension_days ?? '', resolution: c.resolution_list },
+    values: { ...c, date: c.sentence_date || state.meta.today, suspension_days: c.suspension_days ?? '', resolution: c.resolution_list },
     onSubmit: async v => {
-      await rpc('registerSentence', c.id, { date: v.date, resolution: v.resolution, suspension_days: v.suspension_days });
-      if (v.file) await rpc('attachPaths', c.id, 'sentencia', [v.file]);
+      const { file, ...data } = v;
+      await rpc('registerSentence', c.id, data);
+      if (file) await rpc('attachPaths', c.id, 'sentencia', [file]);
     }
   });
   if (ok) { toast('Sentencia registrada', 'ok'); refresh(); }
@@ -982,6 +1023,40 @@ function backupBox(s) {
   return box;
 }
 
+async function documentSignersModal() {
+  const config = JSON.parse(state.settings.document_signers || '{}');
+  const roles = [['judge', 'Juez o jueza'], ['secretary', 'Secretaría']];
+  const fields = [];
+  const values = {};
+  for (const [role, label] of roles) {
+    const saved = config[role] || {};
+    fields.push(
+      { name: role + 'Name', label: label + ' · Nombre titular', required: true },
+      { name: role + 'Title', label: label + ' · Cargo titular', required: true },
+      { name: role + 'SubName', label: label + ' · Nombre subrogante' },
+      { name: role + 'SubTitle', label: label + ' · Cargo subrogante' },
+      { name: role + 'From', label: label + ' · Subrogancia desde', type: 'date' },
+      { name: role + 'To', label: label + ' · Subrogancia hasta', type: 'date' }
+    );
+    Object.assign(values, {
+      [role + 'Name']: saved.name, [role + 'Title']: saved.title,
+      [role + 'SubName']: saved.sub?.name, [role + 'SubTitle']: saved.sub?.title,
+      [role + 'From']: saved.sub?.from, [role + 'To']: saved.sub?.to
+    });
+  }
+  const saved = await formModal({ title: 'Firmantes de exhortos', submitLabel: 'Guardar', fields, values,
+    onSubmit: async v => {
+      const updated = {};
+      for (const [role] of roles) {
+        const sub = { name: v[role + 'SubName'], title: v[role + 'SubTitle'], from: v[role + 'From'], to: v[role + 'To'] };
+        updated[role] = { name: v[role + 'Name'], title: v[role + 'Title'], sub: Object.values(sub).some(Boolean) ? sub : null };
+      }
+      await rpc('saveDocumentSigners', updated);
+    }
+  });
+  if (saved) { await loadSettings(); toast('Firmantes guardados', 'ok'); }
+}
+
 async function renderSettings(main) {
   await loadSettings();
   const info = await rpc('appInfo').catch(() => null);
@@ -1006,6 +1081,20 @@ async function renderSettings(main) {
   const sig = h('textarea', { id: 's-sig', rows: 5, placeholder: 'Nombre\nCargo\nJuzgado de Policía Local de …\nTeléfono · correo' }, s.email_signature || '');
   add(main,
     h('div', { class: 'page-head' }, h('div', null, h('h2', null, 'Ajustes'), h('p', null, 'Plazos de alerta y datos del juzgado.'))),
+    h('section', { class: 'card' }, h('h3', null, 'Plantillas Word'),
+      h('p', null, 'Edita el texto fijo y el formato en Word. Conserva completos los marcadores [[SIGEX:…]] y guarda con Ctrl+G.'),
+      ...Object.entries(await rpc('documentModels')).map(([key, model]) =>
+        h('div', { class: 'row', style: 'gap:8px;margin-bottom:6px;flex-wrap:wrap' },
+          h('span', null, model.title),
+          h('button', { class: 'btn sm', onclick: () => run(() => rpc('editDocumentTemplate', key)) }, 'Editar en Word'),
+          h('button', { class: 'btn sm', onclick: () => run(async () => {
+            if (await confirmBox('¿Volver a la plantilla original de este modelo?', 'Restaurar')) {
+              await rpc('resetDocumentTemplate', key);
+              toast('Plantilla restaurada', 'ok');
+            }
+          }) }, 'Restaurar')))),
+    h('section', { class: 'card' }, h('h3', null, 'Firmantes de exhortos'),
+      h('button', { class: 'btn', onclick: () => run(documentSignersModal) }, 'Configurar titulares y subrogancias')),
     h('section', { class: 'card' }, h('h3', null, 'Plazos y alertas'),
       h('div', { class: 'form-grid' },
         h('div', { class: 'field' }, h('label', { for: 's-sentence' }, 'Esperar sentencia (días desde el envío de la carta)'), sentence),

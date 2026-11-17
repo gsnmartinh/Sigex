@@ -42,15 +42,63 @@ function pickFile(options) {
 function buildHandlers() {
   const h = { ...service };
   h.documentModels = () => MODELS;
-  h.previewExhortoDocument = (id, input) => buildDocument(service.getCase(id), { ...input, preview: !input.ord }, service.getSettings().home_court_name);
+  const templatePath = model => {
+    if (!Object.hasOwn(MODELS, model)) throw new Error('Modelo desconocido.');
+    return path.join(app.getPath('userData'), 'plantillas', model + '.docx');
+  };
+  h.editDocumentTemplate = async model => {
+    const file = templatePath(model);
+    await fs.promises.mkdir(path.dirname(file), { recursive: true });
+    try { await fs.promises.writeFile(file, makeDocx(null, { model }), { flag: 'wx' }); }
+    catch (error) { if (error.code !== 'EEXIST') throw error; }
+    const error = await shell.openPath(file);
+    if (error) throw new Error(error);
+  };
+  h.resetDocumentTemplate = async model => fs.promises.rm(templatePath(model), { force: true });
+  h.saveDocumentSigners = config => {
+    for (const role of ['judge', 'secretary']) {
+      const signer = config[role];
+      if (!signer || !signer.name?.trim() || !signer.title?.trim()) throw new Error('Completa los datos del titular.');
+      const sub = signer.sub;
+      if (sub && (!sub.name?.trim() || !sub.title?.trim() || !/^\d{4}-\d{2}-\d{2}$/.test(sub.from) || !/^\d{4}-\d{2}-\d{2}$/.test(sub.to) || sub.from > sub.to)) {
+        throw new Error('Completa el nombre, cargo y fechas de la subrogancia en orden.');
+      }
+    }
+    service.saveSettings({ document_signers: JSON.stringify(config) });
+  };
+  function documentSigners(date) {
+    const config = JSON.parse(service.getSettings().document_signers || '{}');
+    const atDate = signer => signer?.sub && signer.sub.from <= date && date <= signer.sub.to ? signer.sub : signer;
+    const judge = atDate(config.judge);
+    const secretary = atDate(config.secretary);
+    if (!judge || !secretary) throw new Error('Configura los firmantes en Ajustes.');
+    return { judge: judge.name, judgeRole: judge.title, secretary: secretary.name, secretaryRole: secretary.title };
+  }
+  h.previewExhortoDocument = (id, input) => buildDocument(service.getCase(id), { ...input, ...documentSigners(input.date), preview: !input.ord }, service.getSettings().home_court_name);
   h.exportExhortoDocument = async (id, input) => {
     const c = service.getCase(id);
-    const lines = buildDocument(c, { ...input, preview: false }, service.getSettings().home_court_name);
+    const lines = buildDocument(c, { ...input, ...documentSigners(input.date), preview: false }, service.getSettings().home_court_name);
     const name = (input.model.toUpperCase() + ' - ' + c.rol).replace(/[^a-zA-Z0-9 ._-]/g, '_');
-    const result = await dialog.showSaveDialog(win, { defaultPath: name + '.docx', filters: [{ name: 'Word', extensions: ['docx'] }] });
-    if (result.canceled || !result.filePath) return { canceled: true };
-    await fs.promises.writeFile(result.filePath, makeDocx(lines));
-    return { canceled: false };
+    const folder = path.join(app.getPath('documents'), 'SIGEX', 'Exhortos', 'Rol ' + name.slice(input.model.length + 3).replace(/[. ]+$/, ''));
+    await fs.promises.mkdir(folder, { recursive: true });
+    const file = path.join(folder, name + ' - ' + require('node:crypto').randomUUID().slice(0, 8) + '.docx');
+    const custom = await fs.promises.readFile(templatePath(input.model)).catch(error => {
+      if (error.code !== 'ENOENT') throw error;
+      return null;
+    });
+    let bytes;
+    let usedDefaultTemplate = false;
+    try {
+      bytes = makeDocx(lines, input, c, custom);
+    } catch (error) {
+      if (!custom || error.code !== 'SIGEX_TEMPLATE_MARKERS') throw error;
+      bytes = makeDocx(lines, input, c);
+      usedDefaultTemplate = true;
+    }
+    await fs.promises.writeFile(file, bytes, { flag: 'wx' });
+    const openError = await shell.openPath(file);
+    if (openError) throw new Error('Documento guardado en ' + file + '. Windows no pudo abrirlo: ' + openError);
+    return { canceled: false, usedDefaultTemplate };
   };
   h.pickAndAttach = async (caseId, kind) => {
     const files = await pickFile({ title: 'Seleccionar documento', properties: ['openFile', 'multiSelections'], filters: [{ name: 'PDF e imágenes', extensions: ['pdf', 'png', 'jpg', 'jpeg'] }, { name: 'Todos los archivos', extensions: ['*'] }] });

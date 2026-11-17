@@ -95,6 +95,15 @@ const DEFAULT_SETTINGS = {
 
 // Columnas agregadas después de la primera versión. Se añaden solo si faltan, sin tocar los datos existentes.
 const MIGRATIONS = [
+  ['cases', 'offender_address', 'TEXT'],
+  ['cases', 'license_retained', 'TEXT'],
+  ['cases', 'license_class', 'TEXT'],
+  ['cases', 'license_municipality', 'TEXT'],
+  ['cases', 'license_received_date', 'TEXT'],
+  ['cases', 'license_number', 'TEXT'],
+  ['cases', 'license_issued_date', 'TEXT'],
+  ['cases', 'license_control_date', 'TEXT'],
+  ['cases', 'license_expiry_date', 'TEXT'],
   ['cases', 'citation_number', 'TEXT'],   // N.º de boleta de citación
   ['cases', 'tracking_code', 'TEXT']      // código de seguimiento de Correos de la carta al juzgado
 ];

@@ -25,7 +25,7 @@ function createService({ db, attachmentsDir, now = () => new Date() }) {
     return out;
   }
   function saveSettings(patch) {
-    const allowed = ['alert_sentence_days', 'alert_reminder_wait_days', 'alert_payment_days', 'home_court_name', 'os_notifications', 'holidays', 'mail_client', 'email_signature', 'signature_image', 'greeting_name', 'backup_dir', 'backup_keep'];
+    const allowed = ['alert_sentence_days', 'alert_reminder_wait_days', 'alert_payment_days', 'home_court_name', 'os_notifications', 'holidays', 'mail_client', 'email_signature', 'signature_image', 'greeting_name', 'backup_dir', 'backup_keep', 'document_signers'];
     const up = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
     for (const k of allowed) {
       if (!(k in patch)) continue;
@@ -265,8 +265,8 @@ function createService({ db, attachmentsDir, now = () => new Date() }) {
     return d;
   }
 
-  const DATE_FIELDS = ['entry_date', 'letter_sent_date', 'sentence_date', 'notification_date', 'receipt_date', 'return_date', 'permit_delivery_date'];
-  const EDITABLE = ['rol', 'court_id', 'offender_name', 'offender_rut', 'offender_email', 'offender_phone', 'offender_gender', 'citation_number', 'tracking_code',
+  const DATE_FIELDS = ['license_received_date', 'license_issued_date', 'license_control_date', 'license_expiry_date', 'entry_date', 'letter_sent_date', 'sentence_date', 'notification_date', 'receipt_date', 'return_date', 'permit_delivery_date'];
+  const EDITABLE = ['offender_address', 'license_retained', 'license_class', 'license_municipality', 'license_received_date', 'license_number', 'license_issued_date', 'license_control_date', 'license_expiry_date', 'rol', 'court_id', 'offender_name', 'offender_rut', 'offender_email', 'offender_phone', 'offender_gender', 'citation_number', 'tracking_code',
     'entry_date', 'letter_sent_date', 'sentence_date', 'resolution', 'notification_date', 'is_resend', 'receipt_date', 'return_date',
     'final_status', 'suspension_days', 'permit_delivery_date', 'needs_review', 'notes'];
 
@@ -283,6 +283,11 @@ function createService({ db, attachmentsDir, now = () => new Date() }) {
     }
     if (k === 'offender_gender') { const s = clean(v); return s === 'M' || s === 'F' ? s : null; }
     if (k === 'final_status') { const s = clean(v); if (s && !['Devuelto', 'Archivado', 'Anulado'].includes(s)) throw new Error('Estado final inválido.'); return s; }
+    if (k === 'license_retained') {
+      const status = clean(v);
+      if (status && !['yes', 'no'].includes(status)) throw new Error('Indica si la licencia quedó retenida.');
+      return status;
+    }
     if (DATE_FIELDS.includes(k)) {
       const s = clean(v);
       if (s && !L.isValidISO(s)) throw new Error('Fecha inválida.');
@@ -293,6 +298,7 @@ function createService({ db, attachmentsDir, now = () => new Date() }) {
 
   // Compara solo los campos que cambian, para no bloquear la edición de causas migradas con fechas antiguas incoherentes.
   const ORDER = [
+    ['license_issued_date', 'license_expiry_date', 'El vencimiento de la licencia no puede ser anterior a su otorgamiento.'],
     ['entry_date', 'letter_sent_date', 'La fecha de envío de la carta no puede ser anterior al ingreso.'],
     ['entry_date', 'sentence_date', 'La fecha de sentencia no puede ser anterior al ingreso.'],
     ['sentence_date', 'notification_date', 'La notificación no puede ser anterior a la sentencia.'],
@@ -369,9 +375,12 @@ function createService({ db, attachmentsDir, now = () => new Date() }) {
     if (tracking_code !== undefined) patch.tracking_code = tracking_code;
     return updateCase(id, patch);
   }
-  function registerSentence(id, { date, resolution, suspension_days }) {
+  function registerSentence(id, { date, resolution, suspension_days, ...license }) {
     const patch = { sentence_date: reqDate(date, 'sentencia'), resolution };
     if (suspension_days !== undefined) patch.suspension_days = suspension_days;
+    for (const field of ["license_retained","license_class","license_municipality","license_received_date","license_number","license_issued_date","license_control_date","license_expiry_date"]) {
+      if (Object.hasOwn(license, field)) patch[field] = license[field];
+    }
     return updateCase(id, patch);
   }
   function registerReceipt(id, { date }) { return updateCase(id, { receipt_date: reqDate(date, 'recepción del comprobante') }); }
