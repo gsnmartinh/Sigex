@@ -21,7 +21,7 @@ let serial = 1, count = 0;
 const test = async (name, fn) => { await fn(); count++; console.log('  ok  ' + name); };
 function makeCase(patch = {}) {
   return service.createCase({ rol: serial++ + '-26', court_id: court, entry_date: '2026-09-01',
-    offender_name: 'Persona de Ejemplo', offender_rut: '20.017.300-7', offender_address: 'Calle de Ejemplo 123',
+    offender_name: 'Persona de Ejemplo', offender_rut: '12.345.678-5', offender_address: 'Calle de Ejemplo 123',
     origin_rol: 'ORIGEN-123', request_folio: '1', license_retained: 'no', letter_sent_date: '2026-09-02',
     sentence_date: '2026-10-01', notification_date: '2026-10-02', resolution: 'Transferencia', ...patch }).id;
 }
@@ -89,7 +89,7 @@ async function main() {
   });
   await test('búsqueda por boleta, seguimiento, rol de origen y RUT con o sin puntuación', () => {
     const id = makeCase({ citation_number: 'BOLETA-UNICA', tracking_code: 'SEGUIMIENTO-UNICO', origin_rol: 'ORIGEN-UNICO' });
-    for (const q of ['BOLETA-UNICA', 'SEGUIMIENTO-UNICO', 'ORIGEN-UNICO', '20017300-7', '20.017.300-7']) assert(service.listCases({ q }).some(c => c.id === id));
+    for (const q of ['BOLETA-UNICA', 'SEGUIMIENTO-UNICO', 'ORIGEN-UNICO', '12345678-5', '12.345.678-5']) assert(service.listCases({ q }).some(c => c.id === id));
   });
   await test('los 20 modelos generan Word Legal sin marcadores pendientes y con las plantillas originales', async () => {
     const id = makeCase({ license_retained: 'yes', license_received_date: '2026-11-01', license_delivered_date: '2026-11-15', receipt_date: '2026-11-13', payment_remitted_date: '2026-11-14', license_class: 'B', license_number: 'XXXX', license_municipality: 'Ejemplo' });

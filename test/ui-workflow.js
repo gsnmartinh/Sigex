@@ -22,7 +22,7 @@ const { chromium } = require('playwright');
     await page.locator('#f-request_folio').fill('1');
     await page.locator('#f-court').fill(courts[0].name);
     await page.locator('#f-offender_name').fill('Persona de Prueba');
-    await page.locator('#f-offender_rut').fill('20.017.300-7');
+    await page.locator('#f-offender_rut').fill('12.345.678-5');
     await page.locator('#f-offender_address').fill('Domicilio de Prueba');
     await page.locator('#f-offender_email').fill('prueba@example.org');
     await page.locator('#f-license_retained').selectOption('yes');
