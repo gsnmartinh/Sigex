@@ -11,6 +11,7 @@ const STAGES = {
   sentencia: 'Sentencia recibida · por notificar',
   notificado: 'Notificado · espera comprobante',
   comprobante: 'Comprobante recibido',
+  recurso: 'Reconsideración · plazos detenidos',
   devuelto: 'Devuelto',
   archivado: 'Archivado',
   anulado: 'Anulado'
@@ -63,6 +64,7 @@ function stageOf(c) {
   if (c.final_status === 'Devuelto') return 'devuelto';
   if (c.final_status === 'Archivado') return 'archivado';
   if (c.final_status === 'Anulado') return 'anulado';
+  if (appealPaused(c)) return 'recurso';
   if (c.receipt_date) return 'comprobante';
   if (c.notification_date) return 'notificado';
   if (c.sentence_date) return 'sentencia';
@@ -107,8 +109,49 @@ function addBusinessDays(iso, n, holidays) {
 }
 const RESEND_DAYS = 5;
 function resendDue(c, settings) {
-  if (!c.is_resend || !c.notification_date || c.receipt_date) return null;
+  if (appealPaused(c) || !c.is_resend || !c.notification_date || c.receipt_date) return null;
   return addBusinessDays(c.notification_date, RESEND_DAYS, parseHolidays(settings && settings.holidays));
+}
+
+function appealPaused(c) {
+  return ['presentado', 'remitido', 'resuelto'].includes(c.appeal_state);
+}
+function paymentDue(c, settings) {
+  if (appealPaused(c) || c.receipt_date || !needsPayment(c.resolution)) return null;
+  if (c.is_resend) return resendDue(c, settings);
+  const start = c.appeal_notification_date || c.notification_date;
+  return start ? addDays(start, Number(settings?.alert_payment_days) || 30) : null;
+}
+function licenseInfo(c, today) {
+  if (c.license_delivered_date) return { state: 'entregada', label: 'Entregada al titular', date: c.license_delivered_date };
+  if (c.license_returned_date) return { state: 'devuelta', label: 'Devuelta al tribunal', date: c.license_returned_date };
+  if (c.license_received_date) {
+    const suspension = suspensionInfo(c, today);
+    const ready = !!c.notification_date && (c.receipt_date || !needsPayment(c.resolution)) && !appealPaused(c)
+      && (!suspension || suspension.state === 'cumplida');
+    return { state: ready ? 'retiro' : 'custodia', label: ready ? 'Lista para retirar' : 'Original en el juzgado', date: c.license_received_date };
+  }
+  if (c.license_retained === 'yes') return { state: 'pendiente', label: 'Pendiente de recepción' };
+  return { state: c.license_retained === 'no' ? 'sin_licencia' : 'por_confirmar', label: c.license_retained === 'no' ? 'Sin licencia retenida' : 'Retención por confirmar' };
+}
+function closureInfo(c, settings, today) {
+  const archive = [], returned = [];
+  if (appealPaused(c)) { archive.push('Resolver y notificar la reconsideración'); returned.push('Resolver y notificar la reconsideración'); }
+  if (!c.sentence_date) archive.push('Registrar la sentencia recibida');
+  if (!c.notification_date) archive.push('Registrar la notificación');
+  if (needsPayment(c.resolution) && !c.receipt_date) archive.push('Acreditar el pago');
+  if (c.receipt_date && !c.payment_remitted_date) archive.push('Registrar el despacho del comprobante al tribunal');
+  const suspension = suspensionInfo(c, today);
+  if (suspension && suspension.state !== 'cumplida') archive.push(suspension.state === 'sin_permiso' ? 'Registrar la entrega del permiso para iniciar la suspensión' : 'Esperar el cumplimiento de la suspensión');
+  if (!c.license_retained && !c.license_received_date && !c.license_delivered_date && !c.license_returned_date) archive.push('Confirmar si hay licencia retenida');
+  if (c.license_retained === 'yes' && !c.license_delivered_date && !c.license_returned_date) archive.push(c.license_received_date ? 'Registrar la entrega de la licencia original' : 'Recibir y entregar o devolver la licencia original');
+  else if (c.license_received_date && !c.license_delivered_date && !c.license_returned_date) archive.push('Registrar la entrega o devolución de la licencia original');
+  if (c.license_received_date && !c.license_delivered_date && !c.license_returned_date) returned.push('Registrar la devolución de la licencia original');
+  if (c.notification_date && needsPayment(c.resolution) && !c.receipt_date && !appealPaused(c)) {
+    if (!c.is_resend) returned.push('Enviar el segundo aviso y esperar sus 5 días hábiles');
+    else if (resendDue(c, settings) >= today) returned.push('Esperar el vencimiento completo del segundo aviso');
+  }
+  return { can_archive: !archive.length, archive_pending: archive, can_return: !returned.length, return_pending: returned };
 }
 
 // Alertas y acciones de una causa. kind: 'plazo' | 'accion' | 'suspension' | 'revisar'
@@ -117,6 +160,7 @@ function alertsFor(c, settings, today) {
   const stage = stageOf(c);
   const sentenceDays = Number(settings.alert_sentence_days) || 30;
   const paymentDays = Number(settings.alert_payment_days) || 30;
+  if (c.final_status) return out;
 
   if (c.needs_review) {
     out.push({ kind: 'revisar', severity: 'info', code: 'revisar', title: 'Revisar fechas (dato migrado incompleto)', due_date: null, days_left: null });
@@ -130,7 +174,10 @@ function alertsFor(c, settings, today) {
   };
 
   if (!c.needs_review) {
-    if (stage === 'ingresado') {
+    if (stage === 'recurso') {
+      const titles = { presentado: 'Remitir la reconsideración al tribunal de origen', remitido: 'Esperando respuesta a la reconsideración', resuelto: 'Notificar la resolución de la reconsideración' };
+      out.push({ kind: c.appeal_state === 'remitido' ? 'espera' : 'accion', severity: 'info', code: 'recurso_' + c.appeal_state, title: titles[c.appeal_state], due_date: null, days_left: null });
+    } else if (stage === 'ingresado') {
       out.push({ kind: 'accion', severity: 'info', code: 'enviar_carta', title: 'Enviar carta al juzgado remitente', due_date: null, days_left: null });
     } else if (stage === 'carta') {
       const n = Number(c.reminder_count) || 0;
@@ -159,13 +206,23 @@ function alertsFor(c, settings, today) {
         if (left < 0) out.push({ kind: 'plazo', severity: 'vencido', code: 'reenvio_vencido', title: 'Reenvío sin pago en 5 días hábiles: devolver al tribunal y archivar', due_date: due, days_left: left });
         else if (left <= 2) out.push({ kind: 'plazo', severity: 'proximo', code: 'reenvio_vencido', title: 'Reenvío: vence el plazo de 5 días hábiles para pagar', due_date: due, days_left: left });
       } else if (needsPayment(c.resolution)) {
-        deadline('comprobante_atrasado', `Sin comprobante de pago ${paymentDays} días después de notificar`, c.notification_date, paymentDays);
+        deadline('comprobante_atrasado', `Sin comprobante de pago ${paymentDays} días después de notificar`, c.appeal_notification_date || c.notification_date, paymentDays);
+        if (paymentDue(c, settings) < today) out.push({ kind: 'accion', severity: 'info', code: 'segundo_aviso', title: 'Preparar segundo aviso de pago', due_date: paymentDue(c, settings), days_left: diffDays(today, paymentDue(c, settings)) });
       } else {
-        out.push({ kind: 'accion', severity: 'info', code: 'cerrar', title: 'Sin pago: corresponde archivar', due_date: null, days_left: null });
+        if (closureInfo(c, settings, today).can_archive) out.push({ kind: 'accion', severity: 'info', code: 'cerrar', title: 'Sin multa pendiente: listo para archivar', due_date: null, days_left: null });
       }
     } else if (stage === 'comprobante') {
-      out.push({ kind: 'accion', severity: 'info', code: 'archivar', title: 'Comprobante recibido: archivar la causa', due_date: null, days_left: null });
+      if (!c.payment_remitted_date) out.push({ kind: 'accion', severity: 'info', code: 'remitir_pago', title: 'Preparar y remitir los documentos del pago', due_date: null, days_left: null });
+      if (closureInfo(c, settings, today).can_archive) out.push({ kind: 'accion', severity: 'info', code: 'archivar', title: 'Diligencias cumplidas: listo para archivar', due_date: null, days_left: null });
     }
+  }
+
+  const license = licenseInfo(c, today);
+  if (!c.needs_review && license.state === 'retiro') out.push({ kind: 'accion', severity: 'info', code: 'retirar_licencia', title: 'Licencia disponible: pendiente de retiro', due_date: null, days_left: null });
+  if (!c.needs_review && license.state === 'pendiente' && c.letter_sent_date && c.sentence_date) deadline('licencia_atrasada', 'Reiterar la remisión de la licencia original', c.letter_sent_date, sentenceDays);
+  if (c.provisional_expires_date && c.license_retained === 'yes' && !c.license_delivered_date && !c.license_returned_date && !c.permit_delivery_date) {
+    const left = diffDays(today, c.provisional_expires_date);
+    if (left <= WARN_DAYS) out.push({ kind: 'plazo', severity: left < 0 ? 'vencido' : 'proximo', code: 'permiso_vencimiento', title: 'Revisar vigencia del permiso provisorio', due_date: c.provisional_expires_date, days_left: left });
   }
 
   const s = suspensionInfo(c, today);
@@ -358,7 +415,7 @@ module.exports = {
   parseISO, fmtISO, addDays, diffDays, todayISO, isValidISO,
   parseResolution, stringifyResolution, needsPayment,
   parseHolidays, isBusinessDay, addBusinessDays, resendDue, RESEND_DAYS,
-  stageOf, suspensionInfo, alertsFor,
+  stageOf, suspensionInfo, alertsFor, appealPaused, paymentDue, licenseInfo, closureInfo,
   buildSentenceEmail, buildCourtLetterEmail, buildReminderEmail, formatRut,
   greeting, TEMPLATE_VARS, DEFAULT_TEMPLATES, unknownPlaceholders, renderTemplate
 };

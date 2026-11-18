@@ -1,5 +1,5 @@
 'use strict';
-const { app, BrowserWindow, ipcMain, dialog, shell, Notification, Menu, nativeTheme } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, Notification, Menu, nativeTheme, safeStorage } = require('electron');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -8,6 +8,8 @@ const { createService } = require('./src/service');
 const { openDraft } = require('./src/outlook');
 const { MODELS, buildDocument, makeDocx } = require('./src/exhorto-documents');
 const { createScanSession } = require('./src/scan');
+const { createDocumentWorkflow } = require('./src/document-workflow');
+const { callCorrespondence, validateEndpoint } = require('./src/correspondence');
 
 // Los datos viven en la misma carpeta que usaba la versión anterior (%APPDATA%\sigex), en un archivo nuevo.
 // Los archivos internos de Chromium usan otra carpeta, para poder abrir la versión anterior al mismo tiempo.
@@ -74,31 +76,59 @@ function buildHandlers() {
     if (!judge || !secretary) throw new Error('Configura los firmantes en Ajustes.');
     return { judge: judge.name, judgeRole: judge.title, secretary: secretary.name, secretaryRole: secretary.title };
   }
-  h.previewExhortoDocument = (id, input) => buildDocument(service.getCase(id), { ...input, ...documentSigners(input.date), preview: !input.ord }, service.getSettings().home_court_name);
-  h.exportExhortoDocument = async (id, input) => {
-    const c = service.getCase(id);
-    const lines = buildDocument(c, { ...input, ...documentSigners(input.date), preview: false }, service.getSettings().home_court_name);
-    const name = (input.model.toUpperCase() + ' - ' + c.rol).replace(/[^a-zA-Z0-9 ._-]/g, '_');
-    const folder = path.join(app.getPath('documents'), 'SIGEX', 'Exhortos', 'Rol ' + name.slice(input.model.length + 3).replace(/[. ]+$/, ''));
-    await fs.promises.mkdir(folder, { recursive: true });
-    const file = path.join(folder, name + ' - ' + require('node:crypto').randomUUID().slice(0, 8) + '.docx');
-    const custom = await fs.promises.readFile(templatePath(input.model)).catch(error => {
-      if (error.code !== 'ENOENT') throw error;
-      return null;
-    });
-    let bytes;
-    let usedDefaultTemplate = false;
-    try {
-      bytes = makeDocx(lines, input, c, custom);
-    } catch (error) {
-      if (!custom || error.code !== 'SIGEX_TEMPLATE_MARKERS') throw error;
-      bytes = makeDocx(lines, input, c);
-      usedDefaultTemplate = true;
+  const correspondenceCall = payload => {
+    const settings = service.getSettings();
+    let token = '';
+    if (settings.ord_secret) {
+      try { token = safeStorage.decryptString(Buffer.from(settings.ord_secret, 'base64')); }
+      catch (_) { throw new Error('Vuelve a ingresar la clave ORD. en Ajustes de este computador.'); }
     }
-    await fs.promises.writeFile(file, bytes, { flag: 'wx' });
-    const openError = await shell.openPath(file);
-    if (openError) throw new Error('Documento guardado en ' + file + '. Windows no pudo abrirlo: ' + openError);
-    return { canceled: false, usedDefaultTemplate };
+    return callCorrespondence({ endpoint: settings.ord_endpoint, token, payload });
+  };
+  Object.assign(h, createDocumentWorkflow({ service,
+    templateDir: path.join(app.getPath('userData'), 'plantillas'),
+    outputDir: path.join(app.getPath('documents'), 'SIGEX', 'Exhortos'),
+    signers: documentSigners,
+    reserveOrd: async payload => (await correspondenceCall({ ...payload, action: 'reserve' })).ord,
+    openFile: file => shell.openPath(file)
+  }));
+  h.saveOrdConnection = ({ endpoint, token }) => {
+    const patch = { ord_endpoint: endpoint ? validateEndpoint(endpoint.trim()) : '' };
+    if (patch.ord_endpoint && !token && !service.getSettings().ord_secret) throw new Error('Completa la clave configurada en el script de Google.');
+    if (token) {
+      if (token.length < 32) throw new Error('Usa una clave de al menos 32 caracteres, igual a la del script.');
+      if (!safeStorage.isEncryptionAvailable()) throw new Error('Windows no pudo proteger la clave de conexión.');
+      patch.ord_secret = safeStorage.encryptString(token).toString('base64');
+    }
+    service.saveSettings(patch);
+    return { ok: true };
+  };
+  h.testOrdConnection = () => correspondenceCall({ action: 'ping' });
+  h.openCorrespondenceSheet = () => shell.openExternal('https://docs.google.com/spreadsheets/d/1ppESVdKz3d8JUCsFSgpJIyjdtH8KTTBOeRCXKzwmf2Q/edit');
+  h.openOrdInstructions = async () => {
+    const dest = path.join(dataRoot, 'conexion-ord');
+    fs.mkdirSync(dest, { recursive: true });
+    for (const name of ['README.md', 'Code.gs', 'appsscript.json']) fs.copyFileSync(path.join(__dirname, 'integrations', 'google-sheets', name), path.join(dest, name));
+    const error = await shell.openPath(dest);
+    if (error) throw new Error(error);
+  };
+  h.openGeneratedDocument = async id => {
+    const error = await shell.openPath(service.generatedDocumentPath(id));
+    if (error) throw new Error(error);
+    return { ok: true };
+  };
+  h.openCaseFolder = async id => {
+    const c = service.getCase(id);
+    const folder = path.join(service.getSettings().documents_output_dir || path.join(app.getPath('documents'), 'SIGEX', 'Exhortos'), 'Rol ' + c.rol.replace(/[\\/:*?"<>|]/g, '_').replace(/[. ]+$/, ''));
+    await fs.promises.mkdir(folder, { recursive: true });
+    const error = await shell.openPath(folder);
+    if (error) throw new Error(error);
+  };
+  h.pickDocumentFolder = async () => {
+    const dirs = await pickFile({ title: 'Carpeta para los Word de SIGEX', properties: ['openDirectory', 'createDirectory'] });
+    if (!dirs) return { canceled: true };
+    service.saveSettings({ documents_output_dir: dirs[0] });
+    return { canceled: false, path: dirs[0] };
   };
   h.pickAndAttach = async (caseId, kind) => {
     const files = await pickFile({ title: 'Seleccionar documento', properties: ['openFile', 'multiSelections'], filters: [{ name: 'PDF e imágenes', extensions: ['pdf', 'png', 'jpg', 'jpeg'] }, { name: 'Todos los archivos', extensions: ['*'] }] });
@@ -262,6 +292,7 @@ if (!gotLock) {
   });
   // Al cerrar, si hay carpeta de respaldo configurada, se deja la copia del día. Un fallo aquí nunca debe impedir cerrar.
   app.on('window-all-closed', () => {
+    try { if (service) service.syncGeneratedBackups(); } catch (_) { /* el original permanece en su carpeta */ }
     try { if (service && service.getSettings().backup_dir) service.runBackup(); } catch (_) { /* se avisa al abrir si pasan días sin respaldo */ }
     if (db) db.close();
     app.quit();

@@ -1,0 +1,106 @@
+'use strict';
+// Prueba opcional con Playwright instalado: iniciar ui-server.js con SIGEX_TEST_AUTO_ORD=1.
+const assert = require('node:assert/strict');
+const { chromium } = require('playwright');
+
+(async () => {
+  const browser = await chromium.launch({ channel: process.env.SIGEX_BROWSER_CHANNEL || 'msedge', headless: true });
+  const page = await browser.newPage({ viewport: { width: 1440, height: 1050 } });
+  const errors = [];
+  page.on('pageerror', e => errors.push(e.message));
+  const dialog = () => page.locator('dialog[open]').last();
+  const save = async () => { await dialog().getByRole('button', { name: /^Guardar/ }).click(); };
+  const rpc = (name, ...args) => page.evaluate(({ name, args }) => window.api.call(name, ...args), { name, args });
+  try {
+    await page.goto(process.env.SIGEX_UI_URL || 'http://127.0.0.1:4176');
+    await page.getByRole('heading', { name: 'Panel', exact: true }).waitFor();
+    const courts = await rpc('listCourts');
+    const today = (await rpc('meta')).today;
+    await page.locator('#btn-new-case').click();
+    await page.locator('#f-rol').fill('UI-901-26');
+    await page.locator('#f-origin_rol').fill('ORIGEN-700');
+    await page.locator('#f-request_folio').fill('1');
+    await page.locator('#f-court').fill(courts[0].name);
+    await page.locator('#f-offender_name').fill('Persona de Prueba');
+    await page.locator('#f-offender_rut').fill('20.017.300-7');
+    await page.locator('#f-offender_address').fill('Domicilio de Prueba');
+    await page.locator('#f-offender_email').fill('prueba@example.org');
+    await page.locator('#f-license_retained').selectOption('yes');
+    await page.locator('#f-license_class').fill('B');
+    await page.locator('#f-license_municipality').fill('Valdivia');
+    await page.locator('#f-next_action').selectOption('guardar');
+    await save();
+    await page.getByRole('heading', { name: 'Próxima diligencia', exact: true }).waitFor();
+    let cases = await rpc('listCases', { q: 'UI-901-26' });
+    const id = cases[0].id;
+    await page.getByRole('button', { name: 'Registrar envío', exact: true }).click();
+    await save();
+    await page.getByRole('button', { name: 'Registrar sentencia', exact: true }).click();
+    await page.locator('#f-license_received_date').fill(today);
+    await dialog().getByLabel('Página Web', { exact: true }).check();
+    await save();
+    await page.getByRole('button', { name: 'Notificar por correo', exact: true }).click();
+    await page.locator('#n-register').click();
+    await page.getByRole('button', { name: 'Registrar pago y documentos', exact: true }).click();
+    await page.locator('#f-payment_method').selectOption('web');
+    await page.locator('#f-payment_amount').fill('12000');
+    await page.locator('#f-payment_platform').fill('Plataforma municipal de prueba');
+    assert.equal(await page.locator('#f-payment_bank').isVisible(), false);
+    await save();
+    await dialog().getByRole('heading', { name: 'Preparar documentos del trámite' }).waitFor();
+    assert.equal(await page.locator('#f-amount').count(), 0, 'monto reutilizado');
+    assert.equal(await page.locator('#f-platform').count(), 0, 'plataforma reutilizada');
+    assert.equal(await page.locator('#f-origin').count(), 0, 'rol origen reutilizado');
+    await dialog().getByRole('button', { name: 'Revisar y emitir', exact: true }).click();
+    await page.locator('#confirm-ok').click();
+    await page.waitForFunction(async id => (await window.api.call('getCase', id)).generated_documents.length === 2, id);
+    await page.getByRole('heading', { name: 'Word generados', exact: true }).waitFor();
+    await page.waitForFunction(() => !document.querySelector('dialog[open]'));
+    let c = await rpc('getCase', id);
+    assert.equal(c.generated_documents.length, 2);
+    assert.equal(c.payment_amount, 12000);
+    assert.equal(await page.getByRole('button', { name: 'Archivar causa', exact: true }).count(), 0);
+    await page.getByRole('button', { name: 'Documentos de pago', exact: true }).click();
+    await save(); // Abrir existentes.
+    const calls = await page.request.get(new URL('/__calls', page.url()).href).then(r => r.json());
+    assert.equal(calls.filter(c => c.type === 'ord').length, 1, 'reimprimir no reserva otro ORD.');
+    await page.locator('.steps').getByRole('button', { name: 'Registrar despacho', exact: true }).click();
+    await save();
+    await page.getByRole('button', { name: 'Registrar entrega al titular', exact: true }).click();
+    await save();
+    await page.getByRole('button', { name: 'Archivar causa', exact: true }).waitFor();
+    c = await rpc('getCase', id); assert.equal(c.closure.can_archive, true);
+    await page.getByRole('button', { name: 'Resolución de archivo', exact: true }).click();
+    await dialog().getByRole('button', { name: 'Revisar y emitir', exact: true }).click();
+    await page.locator('#confirm-ok').click();
+    await page.waitForFunction(async id => (await window.api.call('getCase', id)).generated_documents.length === 3, id);
+    await page.waitForFunction(() => !document.querySelector('dialog[open]'));
+    assert.equal((await rpc('getCase', id)).generated_documents.length, 3);
+    console.log('  ok  interfaz: ingreso, recepción, pago web, documentos, reimpresión, licencia y archivo');
+
+    const id2 = (await rpc('createCase', { rol: 'UI-RECURSO', court_id: courts[0].id, entry_date: today, letter_sent_date: today, sentence_date: today, notification_date: today, resolution: 'Transferencia', license_retained: 'no', offender_name: 'Ejemplo' })).id;
+    await page.locator('#nav button[data-view="cases"]').click();
+    await page.locator('#case-search').fill('UI-RECURSO');
+    await page.getByRole('cell', { name: 'UI-RECURSO', exact: false }).click();
+    await page.getByRole('button', { name: 'Registrar reconsideración', exact: true }).click();
+    await page.locator('#f-next_action').selectOption('guardar'); await save();
+    assert.equal((await rpc('getCase', id2)).appeal_paused, true);
+    await page.getByRole('button', { name: 'Registrar remisión', exact: true }).click(); await save();
+    await page.getByRole('button', { name: 'Recibir respuesta', exact: true }).click(); await save();
+    await page.getByRole('button', { name: 'Registrar notificación', exact: true }).click(); await save();
+    assert.equal((await rpc('getCase', id2)).appeal_paused, false);
+    console.log('  ok  interfaz: reconsideración con pausa, respuesta y notificación');
+
+    await page.locator('#nav button[data-view="settings"]').click();
+    await page.getByRole('heading', { name: 'Libro de correspondencia · ORD.', exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Comprobar plantilla', exact: true }).first().click();
+    await page.getByText('Plantilla original: campos y generación correctos.', { exact: true }).waitFor();
+    assert.deepEqual(errors, []);
+    console.log('  ok  interfaz: ajustes y validación de plantillas; sin errores de JavaScript');
+  } catch (error) {
+    console.error('Errores de página:', errors);
+    console.error('Pantalla:', (await page.locator('body').innerText()).slice(-4500));
+    if (process.env.SIGEX_UI_SCREENSHOT) await page.screenshot({ path: process.env.SIGEX_UI_SCREENSHOT, fullPage: true });
+    throw error;
+  } finally { await browser.close(); }
+})().catch(e => { console.error(e); process.exitCode = 1; });

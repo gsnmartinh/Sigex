@@ -79,7 +79,7 @@ t('alerta: notificado sin comprobante a 30 días vence hoy; absolución no gener
   const a = L.alertsFor(c, S, '2026-10-19');
   assert.strictEqual(a[0].severity, 'vencido'.replace('vencido', 'proximo')); // vence hoy (0 días) → próximo
   assert.strictEqual(a[0].days_left, 0);
-  const ab = L.alertsFor({ ...c, resolution: 'Absolución' }, S, '2026-11-30');
+  const ab = L.alertsFor({ ...c, resolution: 'Absolución', license_retained: 'no' }, S, '2026-11-30');
   assert.strictEqual(ab.filter(x => x.kind === 'plazo').length, 0);
   assert.strictEqual(ab[0].code, 'cerrar');
 });
