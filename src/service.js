@@ -450,6 +450,8 @@ function createService({ db, attachmentsDir, now = () => new Date() }) {
     return db.transaction(() => {
       const d = reqDate(date, 'despacho del comprobante');
       updateCase(id, { payment_remitted_date: d });
+      const method = getCase(id).payment_method;
+      if (method) db.prepare("UPDATE generated_documents SET state='dispatched', dispatched_date=? WHERE id=(SELECT MAX(id) FROM generated_documents WHERE case_id=? AND model=? AND state!='preparing')").run(d, Number(id), 'x05' + method);
       addEvent(id, 'despacho_pago', d, 'Comprobante remitido al tribunal de origen');
       return { ok: true };
     })();
@@ -730,7 +732,7 @@ function createService({ db, attachmentsDir, now = () => new Date() }) {
     for (const e of fs.readdirSync(src, { withFileTypes: true })) {
       const a = path.join(src, e.name), b = path.join(dst, e.name);
       if (e.isDirectory()) n += copyNewFiles(a, b);
-      else if (!fs.existsSync(b) || fs.statSync(b).size !== fs.statSync(a).size) { fs.copyFileSync(a, b); n++; }
+      else if (!fs.existsSync(b) || fs.statSync(b).size !== fs.statSync(a).size || fs.statSync(b).mtimeMs < fs.statSync(a).mtimeMs) { fs.copyFileSync(a, b); n++; }
     }
     return n;
   }

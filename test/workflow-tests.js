@@ -104,6 +104,8 @@ async function main() {
       if (model === 'x06') { assert(bytes.includes('XXXX')); assert(bytes.includes('<w:b/>')); assert(bytes.includes('w:val="000000"')); }
     }
     assert.equal(service.getCase(id).generated_documents.length, Object.keys(MODELS).length);
+    service.registerPaymentDispatch(id, { date: '2026-11-18' });
+    assert.equal(service.getCase(id).generated_documents.find(d => d.model === 'x05web').state, 'dispatched');
   });
   await test('reimpresión, doble clic y reapertura reutilizan archivo y ORD.; una nueva versión crea otro registro', async () => {
     const id = makeCase(), request_id = randomUUID();
