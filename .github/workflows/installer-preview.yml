@@ -23,4 +23,5 @@ jobs:
         with:
           name: SIGEX-exhortos-prueba
           path: dist/SIGEX2_Setup_*.exe
+          retention-days: 3
           if-no-files-found: error

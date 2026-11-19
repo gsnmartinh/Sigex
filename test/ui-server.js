@@ -8,6 +8,8 @@ const path = require('path');
 const { openDatabase, seedCourts, importLegacy } = require('../src/db');
 const { createService } = require('../src/service');
 const { createScanSession } = require('../src/scan');
+const { createDocumentWorkflow } = require('../src/document-workflow');
+const { MODELS } = require('../src/exhorto-documents');
 
 const root = path.join(__dirname, '..');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sigex-ui-'));
@@ -20,11 +22,25 @@ seedCourts(db, path.join(root, 'data', 'courts_seed.json'));
 const samplePdf = path.join(tmp, 'sentencia_prueba.pdf');
 fs.writeFileSync(samplePdf, '%PDF-1.4\n% prueba\n');
 const calls = [];
+const documentWorkflow = createDocumentWorkflow({ service: svc, templateDir: path.join(tmp, 'templates'), outputDir: path.join(tmp, 'word'),
+  signers: () => ({ judge: 'Juez de Prueba', judgeRole: 'Juez titular', secretary: 'Secretaría de Prueba', secretaryRole: 'Secretaria titular' }),
+  reserveOrd: async p => { calls.push({ type: 'ord', ...p }); return String(1000 + calls.filter(c => c.type === 'ord').length); },
+  openFile: async file => { calls.push({ type: 'word', file }); return ''; } });
+if (process.env.SIGEX_TEST_AUTO_ORD) svc.saveSettings({ ord_endpoint: 'https://script.google.com/macros/s/prueba/exec' });
 const JPG = fs.readFileSync(path.join(__dirname, 'hoja.jpg'));
 const scanner = createScanSession({ tmpRoot: path.join(tmp, 'scan'), acquire: async (f, o = {}) => { if (process.env.SCAN_FAIL) throw new Error('No se encontró un escáner conectado'); const n = o.source === 'feeder' ? (o.duplex ? 4 : 3) : 1; const out = []; for (let i = 0; i < n; i++) { const g = f.replace(/\.jpg$/, `_${i}.jpg`); fs.writeFileSync(g, JPG); out.push(g); } return out; } });
 
 const handlers = {
   ...svc,
+  ...documentWorkflow,
+  documentModels: () => MODELS,
+  openGeneratedDocument: async id => { calls.push({ type: 'reprint', path: svc.generatedDocumentPath(id) }); return { ok: true }; },
+  openCaseFolder: async () => ({ ok: true }),
+  openCorrespondenceSheet: async () => ({ ok: true }),
+  openOrdInstructions: async () => ({ ok: true }),
+  pickDocumentFolder: async () => ({ canceled: true }),
+  testOrdConnection: async () => ({ ok: true, name: 'Libro de prueba' }),
+  saveOrdConnection: async () => ({ ok: true }),
   pickFilePath: async () => samplePdf,
   pickAndAttach: async (id, kind) => { svc.addDocument(id, kind, samplePdf); return { canceled: false, count: 1 }; },
   attachPaths: async (id, kind, paths) => { for (const p of paths) svc.addDocument(id, kind, p); return { count: paths.length }; },

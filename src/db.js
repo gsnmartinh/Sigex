@@ -71,6 +71,37 @@ CREATE TABLE IF NOT EXISTS settings (
   value TEXT
 );
 
+CREATE TABLE IF NOT EXISTS case_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  case_id INTEGER NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,
+  event_date TEXT NOT NULL,
+  detail TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_events_case ON case_events(case_id);
+
+CREATE TABLE IF NOT EXISTS generated_documents (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  case_id INTEGER NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+  request_id TEXT NOT NULL UNIQUE,
+  model TEXT NOT NULL,
+  title TEXT NOT NULL,
+  document_date TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  ord TEXT,
+  input_json TEXT NOT NULL,
+  file_path TEXT,
+  file_name TEXT,
+  state TEXT NOT NULL DEFAULT 'preparing' CHECK(state IN ('preparing','generated','signed','dispatched')),
+  signed_date TEXT,
+  dispatched_date TEXT,
+  error_message TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+CREATE INDEX IF NOT EXISTS idx_generated_case ON generated_documents(case_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_generated_version ON generated_documents(case_id, model, version);
+
 CREATE INDEX IF NOT EXISTS idx_cases_rol ON cases(rol);
 CREATE INDEX IF NOT EXISTS idx_cases_court ON cases(court_id);
 CREATE INDEX IF NOT EXISTS idx_documents_case ON documents(case_id);
@@ -89,14 +120,31 @@ const DEFAULT_SETTINGS = {
   backup_dir: '',
   backup_keep: '14',
   signature_image: '',
+  ord_endpoint: '',
+  ord_secret: '',
+  documents_output_dir: '',
   // Feriados (días no hábiles además de sábado y domingo). Revísalos y complétalos en Ajustes.
   holidays: '2026-10-12\n2026-12-08\n2026-12-25\n2027-01-01\n2027-03-26\n2027-05-21\n2027-07-16\n2027-12-08'
 };
 
 // Columnas agregadas después de la primera versión. Se añaden solo si faltan, sin tocar los datos existentes.
 const MIGRATIONS = [
+  ['cases', 'offender_address', 'TEXT'],
+  ['cases', 'license_retained', 'TEXT'],
+  ['cases', 'license_class', 'TEXT'],
+  ['cases', 'license_municipality', 'TEXT'],
+  ['cases', 'license_received_date', 'TEXT'],
+  ['cases', 'license_number', 'TEXT'],
+  ['cases', 'license_issued_date', 'TEXT'],
+  ['cases', 'license_control_date', 'TEXT'],
+  ['cases', 'license_expiry_date', 'TEXT'],
   ['cases', 'citation_number', 'TEXT'],   // N.º de boleta de citación
-  ['cases', 'tracking_code', 'TEXT']      // código de seguimiento de Correos de la carta al juzgado
+  ['cases', 'tracking_code', 'TEXT'],
+  ...['origin_rol', 'request_folio', 'payment_method', 'payment_bank', 'payment_platform', 'payment_serial',
+    'payment_municipality', 'payment_remitted_date', 'license_delivered_date', 'license_returned_date',
+    'provisional_issued_date', 'provisional_expires_date', 'appeal_state', 'appeal_filed_date', 'appeal_sent_date',
+    'appeal_received_date', 'appeal_notification_date'].map(name => ['cases', name, 'TEXT']),
+  ['cases', 'payment_amount', 'INTEGER']
 ];
 function migrate(db) {
   for (const [table, col, type] of MIGRATIONS) {

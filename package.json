@@ -1,14 +1,14 @@
 {
   "name": "sigex-exhortos",
   "productName": "SIGEX",
-  "version": "2.0.1",
+  "version": "2.1.0",
   "description": "SIGEX 2 · Gestión de exhortos para Juzgado de Policía Local",
   "main": "main.js",
   "author": "Guillermo San Martin",
   "license": "MIT",
   "scripts": {
     "start": "electron .",
-    "test": "node test/run-tests.js",
+    "test": "node test/run-tests.js && node test/workflow-tests.js",
     "dist": "electron-builder --win nsis"
   },
   "dependencies": {
@@ -30,6 +30,7 @@
       "src/**/*",
       "renderer/**/*",
       "data/**/*",
+      "integrations/**/*",
       "package.json",
       "build/icon_512.png"
     ],

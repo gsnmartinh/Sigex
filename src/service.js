@@ -25,7 +25,7 @@ function createService({ db, attachmentsDir, now = () => new Date() }) {
     return out;
   }
   function saveSettings(patch) {
-    const allowed = ['alert_sentence_days', 'alert_reminder_wait_days', 'alert_payment_days', 'home_court_name', 'os_notifications', 'holidays', 'mail_client', 'email_signature', 'signature_image', 'greeting_name', 'backup_dir', 'backup_keep'];
+    const allowed = ['alert_sentence_days', 'alert_reminder_wait_days', 'alert_payment_days', 'home_court_name', 'os_notifications', 'holidays', 'mail_client', 'email_signature', 'signature_image', 'greeting_name', 'backup_dir', 'backup_keep', 'document_signers', 'ord_endpoint', 'ord_secret', 'documents_output_dir'];
     const up = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
     for (const k of allowed) {
       if (!(k in patch)) continue;
@@ -218,15 +218,28 @@ function createService({ db, attachmentsDir, now = () => new Date() }) {
   function decorate(row, settings, t) {
     const stage = L.stageOf(row);
     const alerts = L.alertsFor(row, settings, t);
-    const deadline = alerts.find(a => a.kind === 'plazo');
+    const dates = alerts.filter(a => a.kind === 'plazo').map(a => a.due_date);
+    if (!row.final_status && !row.needs_review) {
+      const due = L.paymentDue(row, settings);
+      if (due) dates.push(due);
+      if (!row.sentence_date && row.letter_sent_date && !row.reminder_count) dates.push(L.addDays(row.letter_sent_date, Number(settings.alert_sentence_days) || 30));
+      if (row.license_retained === 'yes' && !row.license_received_date && row.letter_sent_date) dates.push(L.addDays(row.letter_sent_date, Number(settings.alert_sentence_days) || 30));
+    }
+    const nextDeadline = dates.filter(Boolean).sort()[0] || null;
+    const daysLeft = nextDeadline ? L.diffDays(t, nextDeadline) : null;
     return {
       ...row,
       resolution_list: L.parseResolution(row.resolution),
       stage, stage_label: L.STAGES[stage],
       alerts,
-      next_deadline: deadline ? deadline.due_date : null,
-      deadline_severity: deadline ? deadline.severity : null,
+      next_deadline: nextDeadline,
+      deadline_days_left: daysLeft,
+      deadline_severity: daysLeft === null ? null : daysLeft < 0 ? 'vencido' : daysLeft <= L.WARN_DAYS ? 'proximo' : 'info',
       suspension: L.suspensionInfo(row, t),
+      license: L.licenseInfo(row, t),
+      closure: L.closureInfo(row, settings, t),
+      payment_due: L.paymentDue(row, settings),
+      appeal_paused: L.appealPaused(row),
       resend_due: L.resendDue(row, settings)
     };
   }
@@ -236,8 +249,10 @@ function createService({ db, attachmentsDir, now = () => new Date() }) {
     const where = [], params = {};
     const q = clean(filters.q);
     if (q) {
-      where.push(`(x.rol LIKE @q OR IFNULL(x.offender_name,'') LIKE @q OR IFNULL(x.offender_rut,'') LIKE @q OR c.name LIKE @q OR IFNULL(x.notes,'') LIKE @q)`);
+      where.push(`(x.rol LIKE @q OR IFNULL(x.origin_rol,'') LIKE @q OR IFNULL(x.citation_number,'') LIKE @q OR IFNULL(x.tracking_code,'') LIKE @q OR IFNULL(x.offender_name,'') LIKE @q OR IFNULL(x.offender_rut,'') LIKE @q OR c.name LIKE @q OR IFNULL(x.notes,'') LIKE @q
+        OR (@compact != '' AND REPLACE(REPLACE(REPLACE(UPPER(IFNULL(x.offender_rut,'')),'.',''),'-',''),' ','') LIKE @compact))`);
       params.q = `%${q}%`;
+      params.compact = /^[\d.kK\s-]+$/.test(q) ? '%' + q.replace(/[.\s-]/g, '').toUpperCase() + '%' : '';
     }
     if (filters.court_id) { where.push('x.court_id = @court'); params.court = Number(filters.court_id); }
     const sql = `${caseSelect} ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY x.id DESC`;
@@ -249,6 +264,10 @@ function createService({ db, attachmentsDir, now = () => new Date() }) {
     else if (f === 'con_alerta') rows = rows.filter(r => r.alerts.some(a => a.kind === 'plazo'));
     else if (f === 'revisar') rows = rows.filter(r => r.needs_review);
     else if (f === 'suspension') rows = rows.filter(r => r.suspension && r.suspension.state !== 'cumplida' && !r.final_status);
+    else if (f === 'retiro') rows = rows.filter(r => !r.final_status && r.license.state === 'retiro');
+    else if (f === 'listos_archivo') rows = rows.filter(r => !r.final_status && r.closure.can_archive);
+    else if (f === 'segundo_aviso') rows = rows.filter(r => r.alerts.some(a => a.code === 'segundo_aviso'));
+    else if (f === 'licencia_pendiente') rows = rows.filter(r => !r.final_status && r.license.state === 'pendiente');
     else if (f) rows = rows.filter(r => r.stage === f);
     if (filters.sort === 'plazo') {
       rows.sort((a, b) => (a.next_deadline || '9999') < (b.next_deadline || '9999') ? -1 : (a.next_deadline || '9999') > (b.next_deadline || '9999') ? 1 : 0);
@@ -262,15 +281,27 @@ function createService({ db, attachmentsDir, now = () => new Date() }) {
     const d = decorate(row, getSettings(), today());
     d.documents = db.prepare('SELECT * FROM documents WHERE case_id = ? ORDER BY id').all(row.id);
     d.notifications = db.prepare('SELECT * FROM notifications WHERE case_id = ? ORDER BY sent_at DESC, id DESC').all(row.id);
+    d.generated_documents = db.prepare('SELECT * FROM generated_documents WHERE case_id = ? ORDER BY id DESC').all(row.id);
+    d.events = db.prepare('SELECT * FROM case_events WHERE case_id = ? ORDER BY event_date DESC, id DESC').all(row.id);
     return d;
   }
 
-  const DATE_FIELDS = ['entry_date', 'letter_sent_date', 'sentence_date', 'notification_date', 'receipt_date', 'return_date', 'permit_delivery_date'];
-  const EDITABLE = ['rol', 'court_id', 'offender_name', 'offender_rut', 'offender_email', 'offender_phone', 'offender_gender', 'citation_number', 'tracking_code',
+  const EXTRA_DATES = ['payment_remitted_date', 'license_delivered_date', 'license_returned_date', 'provisional_issued_date', 'provisional_expires_date', 'appeal_filed_date', 'appeal_sent_date', 'appeal_received_date', 'appeal_notification_date'];
+  const EXTRA_FIELDS = ['origin_rol', 'request_folio', 'payment_method', 'payment_amount', 'payment_bank', 'payment_platform', 'payment_serial', 'payment_municipality', 'appeal_state', ...EXTRA_DATES];
+  const DATE_FIELDS = [...EXTRA_DATES, 'license_received_date', 'license_issued_date', 'license_control_date', 'license_expiry_date', 'entry_date', 'letter_sent_date', 'sentence_date', 'notification_date', 'receipt_date', 'return_date', 'permit_delivery_date'];
+  const EDITABLE = ['offender_address', 'license_retained', 'license_class', 'license_municipality', 'license_received_date', 'license_number', 'license_issued_date', 'license_control_date', 'license_expiry_date', 'rol', 'court_id', 'offender_name', 'offender_rut', 'offender_email', 'offender_phone', 'offender_gender', 'citation_number', 'tracking_code',
     'entry_date', 'letter_sent_date', 'sentence_date', 'resolution', 'notification_date', 'is_resend', 'receipt_date', 'return_date',
-    'final_status', 'suspension_days', 'permit_delivery_date', 'needs_review', 'notes'];
+    'final_status', 'suspension_days', 'permit_delivery_date', 'needs_review', 'notes', ...EXTRA_FIELDS];
 
   function normalizeField(k, v) {
+    if (k === 'payment_amount') {
+      if (clean(v) === null) return null;
+      const amount = Number(v);
+      if (!Number.isSafeInteger(amount) || amount < 1) throw new Error('El monto debe ser un número entero positivo en pesos.');
+      return amount;
+    }
+    if (k === 'payment_method' && clean(v) && !['vale', 'transfer', 'web'].includes(v)) throw new Error('Medio de pago inválido.');
+    if (k === 'appeal_state' && clean(v) && !['presentado', 'remitido', 'resuelto', 'notificado'].includes(v)) throw new Error('Estado del recurso inválido.');
     if (k === 'court_id') return Number(v) || null;
     if (k === 'resolution') return L.stringifyResolution(v);
     if (k === 'is_resend' || k === 'needs_review') return v ? 1 : 0;
@@ -283,6 +314,11 @@ function createService({ db, attachmentsDir, now = () => new Date() }) {
     }
     if (k === 'offender_gender') { const s = clean(v); return s === 'M' || s === 'F' ? s : null; }
     if (k === 'final_status') { const s = clean(v); if (s && !['Devuelto', 'Archivado', 'Anulado'].includes(s)) throw new Error('Estado final inválido.'); return s; }
+    if (k === 'license_retained') {
+      const status = clean(v);
+      if (status && !['yes', 'no'].includes(status)) throw new Error('Indica si la licencia quedó retenida.');
+      return status;
+    }
     if (DATE_FIELDS.includes(k)) {
       const s = clean(v);
       if (s && !L.isValidISO(s)) throw new Error('Fecha inválida.');
@@ -293,6 +329,14 @@ function createService({ db, attachmentsDir, now = () => new Date() }) {
 
   // Compara solo los campos que cambian, para no bloquear la edición de causas migradas con fechas antiguas incoherentes.
   const ORDER = [
+    ['license_received_date', 'license_delivered_date', 'La entrega no puede ser anterior a la recepción de la licencia.'],
+    ['license_received_date', 'license_returned_date', 'La devolución no puede ser anterior a la recepción de la licencia.'],
+    ['receipt_date', 'payment_remitted_date', 'El despacho del pago no puede ser anterior a su recepción.'],
+    ['provisional_issued_date', 'provisional_expires_date', 'La vigencia del permiso no puede terminar antes de su emisión.'],
+    ['appeal_filed_date', 'appeal_sent_date', 'La remisión del recurso no puede ser anterior a su presentación.'],
+    ['appeal_filed_date', 'appeal_received_date', 'La respuesta no puede ser anterior a la presentación del recurso.'],
+    ['appeal_received_date', 'appeal_notification_date', 'La notificación del recurso no puede ser anterior a su respuesta.'],
+    ['license_issued_date', 'license_expiry_date', 'El vencimiento de la licencia no puede ser anterior a su otorgamiento.'],
     ['entry_date', 'letter_sent_date', 'La fecha de envío de la carta no puede ser anterior al ingreso.'],
     ['entry_date', 'sentence_date', 'La fecha de sentencia no puede ser anterior al ingreso.'],
     ['sentence_date', 'notification_date', 'La notificación no puede ser anterior a la sentencia.'],
@@ -342,6 +386,12 @@ function createService({ db, attachmentsDir, now = () => new Date() }) {
     if (!next.entry_date) throw new Error('La fecha de ingreso es obligatoria.');
     if (next.court_id !== prev.court_id) resolveCourt(next);
     checkOrder(prev, next);
+    if (next.license_delivered_date && next.license_returned_date) throw new Error('El original solo puede estar entregado al titular o devuelto al tribunal.');
+    if (next.final_status && next.final_status !== prev.final_status && next.final_status !== 'Anulado') {
+      const closure = L.closureInfo(next, getSettings(), next.final_status === 'Devuelto' ? next.return_date || today() : today());
+      const pending = next.final_status === 'Archivado' ? closure.archive_pending : closure.return_pending;
+      if (pending.length) throw new Error('Falta completar: ' + pending.join('; ') + '.');
+    }
     const sets = EDITABLE.filter(k => k in patch).map(k => `${k} = @${k}`);
     if (!sets.length) return { ok: true };
     const params = { id: Number(id) };
@@ -369,12 +419,84 @@ function createService({ db, attachmentsDir, now = () => new Date() }) {
     if (tracking_code !== undefined) patch.tracking_code = tracking_code;
     return updateCase(id, patch);
   }
-  function registerSentence(id, { date, resolution, suspension_days }) {
+  function registerSentence(id, { date, resolution, suspension_days, ...license }) {
     const patch = { sentence_date: reqDate(date, 'sentencia'), resolution };
     if (suspension_days !== undefined) patch.suspension_days = suspension_days;
+    for (const field of ["origin_rol","license_retained","license_class","license_municipality","license_received_date","license_number","license_issued_date","license_control_date","license_expiry_date"]) {
+      if (Object.hasOwn(license, field)) patch[field] = license[field];
+    }
     return updateCase(id, patch);
   }
-  function registerReceipt(id, { date }) { return updateCase(id, { receipt_date: reqDate(date, 'recepción del comprobante') }); }
+  function addEvent(id, kind, date, detail) {
+    db.prepare('INSERT INTO case_events(case_id,kind,event_date,detail) VALUES(?,?,?,?)').run(Number(id), kind, date || today(), detail || null);
+  }
+  function registerReceipt(id, { date, ...payment }) {
+    return db.transaction(() => {
+      const patch = { receipt_date: reqDate(date, 'recepción del comprobante') };
+      for (const key of EXTRA_FIELDS.filter(k => k.startsWith('payment_'))) if (key in payment) patch[key] = payment[key];
+      if (payment.payment_method) {
+        if (!payment.payment_amount) throw new Error('Completa el monto del comprobante.');
+        if (payment.payment_method === 'web' && !clean(payment.payment_platform)) throw new Error('Completa la plataforma municipal.');
+        if (payment.payment_method !== 'web' && !clean(payment.payment_bank)) throw new Error('Completa el banco.');
+        if (payment.payment_method === 'vale' && !clean(payment.payment_serial)) throw new Error('Completa la serie del vale vista.');
+      }
+      updateCase(id, patch);
+      addEvent(id, 'pago', patch.receipt_date, 'Comprobante recibido' + (payment.payment_method ? ' · ' + payment.payment_method + ' · $' + payment.payment_amount : ''));
+      return { ok: true };
+    })();
+  }
+  function registerPaymentDispatch(id, { date }) {
+    if (!getCase(id).receipt_date) throw new Error('Primero registra el comprobante.');
+    return db.transaction(() => {
+      const d = reqDate(date, 'despacho del comprobante');
+      updateCase(id, { payment_remitted_date: d });
+      const method = getCase(id).payment_method;
+      if (method) db.prepare("UPDATE generated_documents SET state='dispatched', dispatched_date=? WHERE id=(SELECT MAX(id) FROM generated_documents WHERE case_id=? AND model=? AND state!='preparing')").run(d, Number(id), 'x05' + method);
+      addEvent(id, 'despacho_pago', d, 'Comprobante remitido al tribunal de origen');
+      return { ok: true };
+    })();
+  }
+  function registerLicenseMovement(id, { action, date }) {
+    const c = getCase(id), d = reqDate(date, 'movimiento de licencia');
+    if (!['recibir', 'entregar', 'devolver'].includes(action)) throw new Error('Movimiento de licencia inválido.');
+    if (action === 'entregar' && c.license.state !== 'retiro') throw new Error('La licencia aún no está disponible para entregar: revisa recepción, pago, recurso y suspensión.');
+    if (action !== 'recibir' && !c.license_received_date) throw new Error('Primero registra la recepción del original.');
+    const field = { recibir: 'license_received_date', entregar: 'license_delivered_date', devolver: 'license_returned_date' }[action];
+    if (action === 'devolver') {
+      const pending = L.closureInfo({ ...c, license_returned_date: d }, getSettings(), d).return_pending;
+      if (pending.length) throw new Error(pending.join('; '));
+    }
+    return db.transaction(() => {
+      updateCase(id, { [field]: d, ...(action === 'recibir' ? { license_retained: 'yes' } : {}) });
+      addEvent(id, 'licencia_' + action, d, { recibir: 'Licencia original recibida', entregar: 'Licencia entregada al titular', devolver: 'Licencia devuelta al tribunal de origen' }[action]);
+      return { ok: true };
+    })();
+  }
+  function registerAppeal(id, { action, date, resolution, suspension_days, note }) {
+    const c = getCase(id), d = reqDate(date, 'reconsideración');
+    if (c.final_status) throw new Error('Reabre el exhorto antes de registrar un recurso.');
+    const patch = {};
+    if (action === 'presentar') {
+      if (!c.sentence_date) throw new Error('Primero registra la sentencia.');
+      if (L.appealPaused(c)) throw new Error('Ya hay una reconsideración pendiente.');
+      patch.appeal_state = 'presentado'; patch.appeal_filed_date = d;
+      patch.appeal_sent_date = null; patch.appeal_received_date = null; patch.appeal_notification_date = null;
+    } else if (action === 'remitir') {
+      if (c.appeal_state !== 'presentado') throw new Error('Primero registra la presentación del recurso.');
+      patch.appeal_state = 'remitido'; patch.appeal_sent_date = d;
+    } else if (action === 'resolver') {
+      if (!['presentado', 'remitido'].includes(c.appeal_state)) throw new Error('No hay recurso pendiente de respuesta.');
+      if (!L.parseResolution(resolution).length) throw new Error('Indica el resultado de la reconsideración.');
+      patch.appeal_state = 'resuelto'; patch.appeal_received_date = d; patch.resolution = resolution;
+      if (suspension_days !== undefined) patch.suspension_days = suspension_days;
+    } else if (action === 'notificar') {
+      if (c.appeal_state !== 'resuelto') throw new Error('Primero registra la respuesta al recurso.');
+      patch.appeal_state = 'notificado'; patch.appeal_notification_date = d; patch.is_resend = 0;
+      // Conserva la notificación inicial; el nuevo plazo usa la fecha del recurso.
+      if (!c.notification_date) patch.notification_date = d;
+    } else throw new Error('Acción de reconsideración inválida.');
+    return db.transaction(() => { updateCase(id, patch); addEvent(id, 'recurso_' + action, d, note || { presentar: 'Reconsideración presentada: plazos de pago y devolución detenidos', remitir: 'Recurso remitido al tribunal de origen', resolver: 'Respuesta al recurso recibida', notificar: 'Resolución del recurso notificada: nuevo plazo de pago si corresponde' }[action]); return { ok: true }; })();
+  }
   function setPermitDelivery(id, { date, days }) {
     const patch = { permit_delivery_date: reqDate(date, 'entrega del permiso provisorio') };
     if (days !== undefined && clean(days) !== null) patch.suspension_days = days;
@@ -387,7 +509,11 @@ function createService({ db, attachmentsDir, now = () => new Date() }) {
     if (!['Devuelto', 'Archivado', 'Anulado'].includes(status)) throw new Error('Estado final inválido.');
     const patch = { final_status: status };
     if (status === 'Devuelto') patch.return_date = reqDate(date, 'devolución');
-    return updateCase(id, patch);
+    return db.transaction(() => {
+      updateCase(id, patch);
+      addEvent(id, 'cierre', date || today(), status);
+      return { ok: true };
+    })();
   }
   function reopenCase(id) { return updateCase(id, { final_status: null, return_date: null }); }
   function markReviewed(id) { return updateCase(id, { needs_review: 0 }); }
@@ -395,10 +521,12 @@ function createService({ db, attachmentsDir, now = () => new Date() }) {
   function registerNotification(id, { date, to, subject, body, attachments, kind = 'sentencia', is_resend }) {
     const c = db.prepare('SELECT * FROM cases WHERE id = ?').get(Number(id));
     if (!c) throw new Error('Exhorto no encontrado.');
+    if (kind === 'sentencia' && L.appealPaused(c)) throw new Error('Usa el trámite de reconsideración para registrar su respuesta y notificación.');
     const sentAt = reqDate(date, 'notificación');
     const recipient = clean(to);
     if (!recipient) throw new Error('Falta el correo del destinatario.');
     const tx = db.transaction(() => {
+      if (kind === 'recurso') registerAppeal(id, { action: 'notificar', date: sentAt });
       db.prepare('INSERT INTO notifications (case_id, kind, to_email, subject, body, attachments, sent_at) VALUES (?,?,?,?,?,?,?)')
         .run(c.id, kind, recipient, clean(subject), clean(body), attachments && attachments.length ? attachments.join(' | ') : null, sentAt);
       if (kind === 'sentencia') {
@@ -412,6 +540,66 @@ function createService({ db, attachmentsDir, now = () => new Date() }) {
     });
     tx();
     return { ok: true };
+  }
+
+  // Cada emisión conserva su solicitud y ORD.; un reintento continúa la misma emisión.
+  function beginGeneratedDocument(id, { request_id, model, title, input }) {
+    if (!/^[a-zA-Z0-9-]{16,80}$/.test(request_id || '')) throw new Error('Identificador de emisión inválido.');
+    const c = getCase(id);
+    const existing = db.prepare('SELECT * FROM generated_documents WHERE request_id = ?').get(request_id);
+    if (existing) {
+      if (existing.case_id !== Number(id) || existing.model !== model) throw new Error('La emisión pertenece a otro documento.');
+      return existing;
+    }
+    return db.transaction(() => {
+      const version = db.prepare('SELECT COALESCE(MAX(version),0)+1 AS v FROM generated_documents WHERE case_id=? AND model=?').get(c.id, model).v;
+      const r = db.prepare('INSERT INTO generated_documents(case_id,request_id,model,title,document_date,version,ord,input_json) VALUES(?,?,?,?,?,?,?,?)')
+        .run(c.id, request_id, model, title, reqDate(input.date, 'documento'), version, clean(input.ord), JSON.stringify(input));
+      return getGeneratedDocument(Number(r.lastInsertRowid));
+    })();
+  }
+  function getGeneratedDocument(id) {
+    const d = db.prepare('SELECT * FROM generated_documents WHERE id=?').get(Number(id));
+    if (!d) throw new Error('Documento generado no encontrado.');
+    return d;
+  }
+  function setGeneratedOrd(id, ord) {
+    const d = getGeneratedDocument(id);
+    if (!clean(ord)) throw new Error('La planilla no entregó un ORD.');
+    if (d.ord && d.ord !== String(ord)) throw new Error('Esta emisión ya tiene un ORD. asignado.');
+    db.prepare('UPDATE generated_documents SET ord=? WHERE id=?').run(String(ord), d.id);
+  }
+  function generatedBackupPath(d) { return path.join(attachmentsDir, String(d.case_id), 'generados', d.file_name || ('emision-' + d.id + '.docx')); }
+  function finishGeneratedDocument(id, file) {
+    const d = getGeneratedDocument(id);
+    const fileName = path.basename(file);
+    const backup = generatedBackupPath({ ...d, file_name: fileName });
+    fs.mkdirSync(path.dirname(backup), { recursive: true });
+    fs.copyFileSync(file, backup);
+    db.prepare("UPDATE generated_documents SET file_path=?, file_name=?, state='generated', error_message=NULL WHERE id=?").run(file, fileName, d.id);
+    addEvent(d.case_id, 'documento', d.document_date, d.title + (d.ord ? ' · ORD. ' + d.ord : '') + ' · versión ' + d.version);
+    return getGeneratedDocument(id);
+  }
+  function failGeneratedDocument(id, message) { db.prepare('UPDATE generated_documents SET error_message=? WHERE id=?').run(String(message).slice(0, 600), Number(id)); }
+  function generatedDocumentPath(id) {
+    const d = getGeneratedDocument(id);
+    if (d.state === 'preparing') throw new Error('La emisión está pendiente. Usa Reintentar.');
+    const backup = generatedBackupPath(d);
+    if (d.file_path && fs.existsSync(d.file_path)) return d.file_path;
+    if (fs.existsSync(backup)) return backup;
+    throw new Error('No se encuentra el Word. Revisa la carpeta de documentos o restaura su respaldo.');
+  }
+  function markGeneratedDocument(id, { state, date }) {
+    const d = getGeneratedDocument(id), eventDate = reqDate(date, 'firma o despacho');
+    if (!['signed', 'dispatched'].includes(state) || d.state === 'preparing') throw new Error('Estado de documento inválido.');
+    if (eventDate < d.document_date) throw new Error('La firma o despacho no puede ser anterior al documento.');
+    if (d.state === 'dispatched' && state === 'signed') throw new Error('El documento ya está despachado.');
+    return db.transaction(() => {
+      if (state === 'dispatched' && /^x05/.test(d.model)) registerPaymentDispatch(d.case_id, { date: eventDate });
+      db.prepare(`UPDATE generated_documents SET state=?, ${state === 'signed' ? 'signed_date' : 'dispatched_date'}=? WHERE id=?`).run(state, eventDate, d.id);
+      addEvent(d.case_id, state === 'signed' ? 'firma' : 'despacho', eventDate, d.title + (d.ord ? ' · ORD. ' + d.ord : ''));
+      return { ok: true };
+    })();
   }
 
   // ---------- Recordatorios de sentencia (varios exhortos de un mismo juzgado en un solo correo) ----------
@@ -523,6 +711,10 @@ function createService({ db, attachmentsDir, now = () => new Date() }) {
         notify: actions.filter(a => a.code === 'notificar').length,
         letter: actions.filter(a => a.code === 'enviar_carta').length,
         suspensions: suspensions.length, review: review.length, waiting: waiting.length,
+        pickup: open.filter(c => c.license.state === 'retiro').length,
+        ready_archive: open.filter(c => c.closure.can_archive).length,
+        appeals: open.filter(c => c.appeal_paused).length,
+        second_notice: open.filter(c => c.alerts.some(a => a.code === 'segundo_aviso')).length,
         open: open.length, total: rows.length,
         closed_month: rows.filter(r => r.final_status && String(r.updated_at || r.created_at || '').startsWith(month)).length
       },
@@ -540,7 +732,7 @@ function createService({ db, attachmentsDir, now = () => new Date() }) {
     for (const e of fs.readdirSync(src, { withFileTypes: true })) {
       const a = path.join(src, e.name), b = path.join(dst, e.name);
       if (e.isDirectory()) n += copyNewFiles(a, b);
-      else if (!fs.existsSync(b) || fs.statSync(b).size !== fs.statSync(a).size) { fs.copyFileSync(a, b); n++; }
+      else if (!fs.existsSync(b) || fs.statSync(b).size !== fs.statSync(a).size || fs.statSync(b).mtimeMs < fs.statSync(a).mtimeMs) { fs.copyFileSync(a, b); n++; }
     }
     return n;
   }
@@ -556,6 +748,7 @@ function createService({ db, attachmentsDir, now = () => new Date() }) {
     fs.rmSync(tmp, { force: true });
     db.exec(`VACUUM INTO '${tmp.replace(/'/g, "''")}'`);
     fs.renameSync(tmp, file);
+    syncGeneratedBackups();
     const documents = copyNewFiles(attachmentsDir, path.join(dir, 'documentos'));
     const keep = Math.max(1, Number(s.backup_keep) || 14);
     const old = fs.readdirSync(dir).filter(f => /^sigex2_\d{4}-\d{2}-\d{2}\.sqlite$/.test(f)).sort().reverse().slice(keep);
@@ -568,12 +761,23 @@ function createService({ db, attachmentsDir, now = () => new Date() }) {
   function backupTo(destPath) {
     return db.backup(destPath).then(() => ({ ok: true }));
   }
+  function syncGeneratedBackups() {
+    for (const d of db.prepare("SELECT * FROM generated_documents WHERE state!='preparing'").all()) {
+      if (!d.file_path || !fs.existsSync(d.file_path)) continue;
+      const backup = generatedBackupPath(d);
+      fs.mkdirSync(path.dirname(backup), { recursive: true });
+      fs.copyFileSync(d.file_path, backup);
+    }
+  }
 
   return {
     getSettings, saveSettings, getTemplates, saveTemplate, resetTemplate, previewTemplate,
     listCourts, createCourt, updateCourt, deleteCourt, exportCourtsCSV, importCourtsCSV,
     listCases, getCase, createCase, updateCase, deleteCase,
     markLetterSent, registerSentence, registerReceipt, setPermitDelivery, closeCase, reopenCase, markReviewed, registerNotification,
+    registerPaymentDispatch, registerLicenseMovement, registerAppeal,
+    beginGeneratedDocument, getGeneratedDocument, setGeneratedOrd, finishGeneratedDocument, failGeneratedDocument,
+    generatedDocumentPath, markGeneratedDocument, syncGeneratedBackups,
     addDocument, documentPath, removeDocument,
     buildEmail, reminderGroups, buildReminder, registerReminder, dashboard, backupTo, runBackup,
     meta: () => ({ regions: REGIONS, resolution_types: L.COMPLIANCE_TYPES, stages: L.STAGES, today: today() })
